@@ -1,0 +1,19 @@
+[package]
+name = "zirtola-publish"
+description = "Turn a packaged game build into a content-addressed chunk store and a signed manifest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+zirtola-core = { path = "../../crates/zirtola-core" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+ed25519-dalek.workspace = true
+chrono.workspace = true
+clap = { version = "4", features = ["derive"] }
+fastcdc = "3"
+walkdir = "2"

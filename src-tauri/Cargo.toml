@@ -1,0 +1,35 @@
+[package]
+name = "zirtola-launcher"
+description = "Zirtola Launcher"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+default-run = "zirtola-launcher"
+
+[lib]
+name = "zirtola_launcher_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+zirtola-core = { path = "../crates/zirtola-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-updater = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+rand.workspace = true
+url.workspace = true
+log.workspace = true
+chrono.workspace = true
+futures.workspace = true
+keyring = { version = "3", features = ["windows-native"] }
+open = "5"

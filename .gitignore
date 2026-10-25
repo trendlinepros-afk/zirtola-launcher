@@ -1,0 +1,30 @@
+# build output
+/target/
+/dist/
+/node_modules/
+/src-tauri/gen/
+/src-tauri/target/
+/art/build/
+
+# mock server data (generated keys, builds, chunk store, state)
+/mock-server/.data/
+
+# secrets: never commit signing material
+*.key
+*.key.pub.bak
+*.pfx
+*.p12
+*.pem
+.env
+.env.*
+**/manifest-key.json
+**/launch-key.json
+/secrets/
+
+# editors / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.log
+Thumbs.db
+.DS_Store

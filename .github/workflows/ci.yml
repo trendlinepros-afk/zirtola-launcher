@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Secret scan
+        run: node scripts/check-secrets.mjs
+
+      - name: UI typecheck and build
+        run: npm run build:ui
+
+      - name: Rust tests (manifests, tokens, install engine)
+        run: cargo test --workspace --locked
+
+      - name: Seed the mock website with small demo builds
+        run: node mock-server/seed.mjs
+        env:
+          MOCK_SCALE: "0.05"
+
+      - name: API contract end-to-end (mock server)
+        run: node scripts/e2e.mjs
+
+      - name: Launcher debug build
+        run: cargo build -p zirtola-launcher --locked

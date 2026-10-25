@@ -1,0 +1,13 @@
+[package]
+name = "license-check"
+description = "Reference license check a game runs at startup; also the stand-in game in the mock builds"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+zirtola-core = { path = "../../crates/zirtola-core" }
+anyhow.workspace = true
+tokio.workspace = true
+chrono.workspace = true

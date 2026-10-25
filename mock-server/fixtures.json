@@ -1,0 +1,57 @@
+{
+  "games": [
+    {
+      "id": "dirt-simulator",
+      "title": "Dirt Digger",
+      "tagline": "Gold placer mining, one bucket at a time.",
+      "description": "Run a placer gold claim with real machines. Every excavator and dozer is a physics-driven hydraulic machine, every bucket of pay dirt is real volume, and the gold only shows up in the sluice if you dug in the right place.",
+      "status": "early_access",
+      "platforms": ["win64"],
+      "art": { "accent": "#e3a33b" },
+      "exe": "DirtDigger.exe",
+      "folder": "DirtDigger"
+    },
+    {
+      "id": "alaskan-bush-simulator",
+      "title": "Alaskan Bush Simulator",
+      "tagline": "Alaskan backcountry flying and bushcraft.",
+      "description": "Fly a taildragger into the Alaskan bush: land on gravel bars and ridgelines, haul supplies to remote camps, and keep yourself alive when the weather closes in and you are a long way from the strip.",
+      "status": "in_development",
+      "platforms": ["win64"],
+      "art": { "accent": "#4fa3c7" },
+      "exe": "AlaskanBushSimulator.exe",
+      "folder": "AlaskanBushSimulator"
+    }
+  ],
+  "accounts": [
+    {
+      "id": "acct_miner",
+      "display_name": "Demo Miner",
+      "login": "miner",
+      "note": "Owns Dirt Digger (purchase)",
+      "entitlements": [{ "game_id": "dirt-simulator", "kind": "purchase", "granted_at": "2026-09-01T12:00:00Z" }]
+    },
+    {
+      "id": "acct_pilot",
+      "display_name": "Demo Pilot",
+      "login": "pilot",
+      "note": "Owns both (purchase + studio grant)",
+      "entitlements": [
+        { "game_id": "alaskan-bush-simulator", "kind": "purchase", "granted_at": "2026-09-10T12:00:00Z" },
+        { "game_id": "dirt-simulator", "kind": "grant", "granted_at": "2026-09-12T12:00:00Z" }
+      ]
+    },
+    {
+      "id": "acct_new",
+      "display_name": "New Player",
+      "login": "new",
+      "note": "Owns nothing; try redeeming a key",
+      "entitlements": []
+    }
+  ],
+  "keys": [
+    { "key": "DIRT-DIGG-ER00-0001", "game_id": "dirt-simulator" },
+    { "key": "DIRT-DIGG-ER00-0002", "game_id": "dirt-simulator" },
+    { "key": "ALAS-KABU-SH00-0001", "game_id": "alaskan-bush-simulator" }
+  ]
+}

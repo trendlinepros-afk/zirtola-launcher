@@ -1,0 +1,27 @@
+{
+  "name": "zirtola-launcher",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Zirtola Launcher: download, update and play Zirtola games",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "dev:ui": "vite",
+    "build:ui": "tsc --noEmit && vite build",
+    "build": "tauri build",
+    "tauri": "tauri",
+    "art": "node scripts/gen-art.mjs && tauri icon art/zirtola-icon.svg -o src-tauri/icons",
+    "mock": "node mock-server/server.mjs",
+    "mock:seed": "node mock-server/seed.mjs",
+    "e2e": "node scripts/e2e.mjs",
+    "check-secrets": "node scripts/check-secrets.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0"
+  }
+}

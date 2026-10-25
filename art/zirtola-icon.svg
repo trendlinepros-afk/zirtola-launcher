@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Zirtola mark: a bold Z cut like a quarry bench, on a slate tile. Hand-authored. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#232a33"/>
+      <stop offset="1" stop-color="#12161b"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f6c766"/>
+      <stop offset="0.55" stop-color="#e3a33b"/>
+      <stop offset="1" stop-color="#b8741f"/>
+    </linearGradient>
+  </defs>
+  <rect x="48" y="48" width="928" height="928" rx="208" fill="url(#tile)"/>
+  <rect x="48" y="48" width="928" height="928" rx="208" fill="none" stroke="#3a4552" stroke-width="12"/>
+  <path d="M272 268 H752 V372 L452 652 H752 V756 H272 V652 L572 372 H272 Z" fill="url(#gold)"/>
+  <!-- bench step highlights -->
+  <path d="M272 268 H752 V292 H272 Z" fill="#fff1c9" opacity="0.35"/>
+  <path d="M272 652 H452 L428 676 H272 Z" fill="#fff1c9" opacity="0.18"/>
+</svg>

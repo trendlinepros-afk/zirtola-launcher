@@ -1,0 +1,67 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Zirtola Launcher",
+  "version": "../package.json",
+  "identifier": "com.zirtola.launcher",
+  "build": {
+    "beforeDevCommand": "npm run dev:ui",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build:ui",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Zirtola Launcher",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 980,
+        "minHeight": 640,
+        "center": true,
+        "decorations": false,
+        "backgroundColor": "#0d1014"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "Zirtola",
+    "copyright": "Copyright (c) Zirtola",
+    "category": "Game",
+    "shortDescription": "Download, update and play Zirtola games",
+    "longDescription": "The Zirtola Launcher installs, updates and launches games from the Zirtola studio for your Zirtola account.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "signCommand": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/sign.ps1 %1",
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "installer/header.bmp",
+        "sidebarImage": "installer/sidebar.bmp",
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENEQzFFMjBCM0NDNjVDOTYKUldTV1hNWThDK0xCelFMNzNJeVlKQTE3RzBLa2pTZGphdkdBbzZ6Rm5ia3E1TGYwQ3NaYnpCL2QK",
+      "endpoints": [
+        "https://github.com/trendlinepros-afk/zitrola-launcher/releases/latest/download/latest.json"
+      ],
+      "windows": { "installMode": "passive" }
+    }
+  }
+}

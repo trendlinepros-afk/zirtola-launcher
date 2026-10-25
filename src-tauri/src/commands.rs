@@ -1,0 +1,536 @@
+//! Commands the UI calls through `invoke`.
+
+use crate::auth;
+use crate::jobs::{self, PLATFORM};
+use crate::state::{dev_mode, AppState, CmdError, CmdResult, JobKind, Settings};
+use serde::Serialize;
+use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_updater::UpdaterExt;
+use tokio_util::sync::CancellationToken;
+use zirtola_core::api::{CatalogGame, Me, RedeemResult};
+use zirtola_core::install::{self, valid_game_id, Journal};
+
+#[derive(Serialize)]
+pub struct AppInfo {
+    version: String,
+    api_base: String,
+    dev_mode: bool,
+    store_url: Option<String>,
+    account_url: Option<String>,
+    support_url: Option<String>,
+}
+
+#[tauri::command]
+pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> CmdResult<AppInfo> {
+    let cfg = state.config().await.ok();
+    Ok(AppInfo {
+        version: app.package_info().version.to_string(),
+        api_base: state.api.base().to_string(),
+        dev_mode: dev_mode(),
+        store_url: cfg.as_ref().map(|c| c.store_url.clone()),
+        account_url: cfg.as_ref().and_then(|c| c.account_url.clone()),
+        support_url: cfg.as_ref().and_then(|c| c.support_url.clone()),
+    })
+}
+
+// ---------------------------------------------------------------- account
+
+#[tauri::command]
+pub async fn restore_session(state: State<'_, AppState>) -> CmdResult<Option<Me>> {
+    state.restore_session().await
+}
+
+#[tauri::command]
+pub async fn sign_in(state: State<'_, AppState>) -> CmdResult<Me> {
+    let cfg = state.config().await?;
+    let cancel = CancellationToken::new();
+    if let Some(old) = state.login_cancel.lock().unwrap().replace(cancel.clone()) {
+        old.cancel();
+    }
+    let tokens = auth::sign_in_browser(&state.api, &cfg, cancel)
+        .await
+        .map_err(|e| match e.downcast::<zirtola_core::api::ApiError>() {
+            Ok(api) => CmdError::from(api),
+            Err(e) => CmdError::new("sign_in_failed", format!("{e:#}")),
+        })?;
+    state.start_session(tokens).await
+}
+
+#[tauri::command]
+pub fn cancel_sign_in(state: State<'_, AppState>) {
+    if let Some(c) = state.login_cancel.lock().unwrap().take() {
+        c.cancel();
+    }
+}
+
+#[tauri::command]
+pub async fn sign_out(state: State<'_, AppState>) -> CmdResult<()> {
+    let sess = state.session.lock().await.take();
+    if let (Some(s), Ok(cfg)) = (sess, state.config().await) {
+        if let (Some(ep), Some(rt)) = (&cfg.revocation_endpoint, &s.tokens.refresh_token) {
+            let _ = state.api.revoke(ep, &cfg.client_id, rt).await;
+        }
+    }
+    auth::clear_refresh_token(state.api.base());
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn redeem_key(state: State<'_, AppState>, key: String) -> CmdResult<RedeemResult> {
+    let key = key.trim().to_uppercase();
+    if key.len() < 5 || key.len() > 64 {
+        return Err(CmdError::new(
+            "invalid_key",
+            "That doesn't look like a Zirtola key.",
+        ));
+    }
+    state
+        .authed(|at| {
+            let api = state.api.clone();
+            let key = key.clone();
+            async move { api.redeem_key(&at, &key).await }
+        })
+        .await
+}
+
+// ---------------------------------------------------------------- library
+
+#[derive(Serialize)]
+pub struct InstallInfo {
+    path: PathBuf,
+    /// Installed version (None if the first install has not finished).
+    version: Option<String>,
+    latest_version: Option<String>,
+    update_available: bool,
+    /// Version of an interrupted install/update that can be resumed.
+    paused_version: Option<String>,
+    folder_missing: bool,
+}
+
+#[derive(Serialize)]
+pub struct LibraryGame {
+    game: CatalogGame,
+    owned: bool,
+    entitlement: Option<String>,
+    install: Option<InstallInfo>,
+    job: Option<JobKind>,
+}
+
+#[tauri::command]
+pub async fn library(state: State<'_, AppState>) -> CmdResult<Vec<LibraryGame>> {
+    let catalog = state.api.catalog().await?;
+    let signed_in = state.session.lock().await.is_some();
+    let ents = if signed_in {
+        state
+            .authed(|at| {
+                let api = state.api.clone();
+                async move { api.entitlements(&at).await }
+            })
+            .await?
+            .entitlements
+    } else {
+        vec![]
+    };
+    let registry = state.registry.lock().await.installs.clone();
+
+    let mut out = Vec::new();
+    for g in catalog.games {
+        if !valid_game_id(&g.id) {
+            continue;
+        }
+        let ent = ents.iter().find(|e| e.game_id == g.id);
+        let install = match registry.get(&g.id) {
+            None => None,
+            Some(rec) => {
+                let on_disk = install::installed_manifest(&rec.path).ok().flatten();
+                let paused = Journal::load(&rec.path).map(|j| j.version);
+                let version = on_disk.as_ref().map(|(_, m)| m.version.clone());
+                Some(InstallInfo {
+                    folder_missing: !rec.path.exists(),
+                    path: rec.path.clone(),
+                    version,
+                    latest_version: None,
+                    update_available: false,
+                    paused_version: paused,
+                })
+            }
+        };
+        out.push(LibraryGame {
+            owned: ent.is_some(),
+            entitlement: ent.map(|e| e.kind.clone()),
+            job: state.job_running(&g.id),
+            game: g,
+            install,
+        });
+    }
+
+    // Update check for installed, owned games (in parallel).
+    let checks = out
+        .iter()
+        .enumerate()
+        .filter(|(_, g)| g.owned && g.install.as_ref().is_some_and(|i| i.version.is_some()))
+        .map(|(i, g)| {
+            let branch = registry
+                .get(&g.game.id)
+                .map(|r| r.branch.clone())
+                .unwrap_or_else(|| "live".into());
+            let id = g.game.id.clone();
+            let st = &state;
+            async move {
+                let r = st
+                    .authed(|at| {
+                        let api = st.api.clone();
+                        let id = id.clone();
+                        let branch = branch.clone();
+                        async move { api.latest_build(&at, &id, PLATFORM, &branch).await }
+                    })
+                    .await;
+                (i, r)
+            }
+        });
+    for (i, r) in futures::future::join_all(checks).await {
+        if let (Ok(latest), Some(inst)) = (r, out[i].install.as_mut()) {
+            inst.update_available = inst.version.as_deref() != Some(latest.version.as_str());
+            inst.latest_version = Some(latest.version);
+        }
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------- folders & disk
+
+fn folder_name(title: &str) -> String {
+    let s: String = title
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' || c == '-' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if s.is_empty() {
+        "Game".into()
+    } else {
+        s
+    }
+}
+
+#[tauri::command]
+pub async fn suggest_install_dir(
+    state: State<'_, AppState>,
+    title: String,
+    parent: Option<String>,
+) -> CmdResult<String> {
+    let base = match parent {
+        Some(p) => PathBuf::from(p),
+        None => state.settings.lock().await.library_dir.clone(),
+    };
+    Ok(base
+        .join(folder_name(&title))
+        .to_string_lossy()
+        .into_owned())
+}
+
+#[tauri::command]
+pub async fn pick_folder(app: AppHandle) -> CmdResult<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Choose a library folder")
+        .pick_folder(move |p| {
+            let _ = tx.send(p);
+        });
+    let picked = rx
+        .await
+        .map_err(|_| CmdError::new("error", "dialog closed"))?;
+    Ok(picked
+        .and_then(|p| p.into_path().ok())
+        .map(|p| p.to_string_lossy().into_owned()))
+}
+
+#[derive(Serialize)]
+pub struct DiskInfo {
+    free_bytes: u64,
+}
+
+#[tauri::command]
+pub fn disk_info(path: String) -> CmdResult<DiskInfo> {
+    Ok(DiskInfo {
+        free_bytes: install::available_space(Path::new(&path))?,
+    })
+}
+
+/// Check that `path` is a sensible place to install `game_id`.
+fn check_install_dir(path: &Path, game_id: &str) -> CmdResult<()> {
+    if !path.is_absolute() || path.parent().is_none() {
+        return Err(CmdError::new(
+            "bad_folder",
+            "Choose a folder, not the root of a drive.",
+        ));
+    }
+    if path.is_file() {
+        return Err(CmdError::new("bad_folder", "That path is a file."));
+    }
+    if path.exists() {
+        if let Some((_, m)) = install::installed_manifest(path)? {
+            if m.game_id != game_id {
+                return Err(CmdError::new(
+                    "bad_folder",
+                    "That folder contains a different game.",
+                ));
+            }
+            return Ok(()); // existing install of this game: adopt and update/repair it
+        }
+        if Journal::load(path).is_some() {
+            return Ok(()); // interrupted install: resume it
+        }
+        let non_empty = std::fs::read_dir(path)?.next().is_some();
+        if non_empty {
+            return Err(CmdError::new(
+                "bad_folder",
+                "That folder is not empty. Choose an empty folder or a new one.",
+            ));
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------- jobs
+
+#[tauri::command]
+pub async fn install_game(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    game_id: String,
+    path: String,
+) -> CmdResult<()> {
+    if !valid_game_id(&game_id) {
+        return Err(CmdError::new("bad_game", "Unknown game."));
+    }
+    state.access_token().await?;
+    let root = PathBuf::from(path);
+    check_install_dir(&root, &game_id)?;
+    std::fs::create_dir_all(&root)
+        .map_err(|e| CmdError::new("bad_folder", format!("Could not create the folder: {e}")))?;
+    let cancel = jobs::begin(&state, &game_id, JobKind::Install)?;
+    jobs::spawn_install(app, game_id, root, JobKind::Install, cancel);
+    Ok(())
+}
+
+async fn install_root(state: &AppState, game_id: &str) -> CmdResult<PathBuf> {
+    state
+        .registry
+        .lock()
+        .await
+        .get(game_id)
+        .map(|r| r.path.clone())
+        .ok_or_else(|| CmdError::new("not_installed", "This game is not installed."))
+}
+
+/// Update to the latest version, or resume a paused install/update.
+#[tauri::command]
+pub async fn update_game(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    game_id: String,
+) -> CmdResult<()> {
+    let root = install_root(&state, &game_id).await?;
+    state.access_token().await?;
+    let kind = if install::installed_manifest(&root)?.is_some() {
+        JobKind::Update
+    } else {
+        JobKind::Install
+    };
+    let cancel = jobs::begin(&state, &game_id, kind)?;
+    jobs::spawn_install(app, game_id, root, kind, cancel);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn verify_game(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    game_id: String,
+) -> CmdResult<()> {
+    let root = install_root(&state, &game_id).await?;
+    let cancel = jobs::begin(&state, &game_id, JobKind::Verify)?;
+    jobs::spawn_verify(app, game_id, root, cancel);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn uninstall_game(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    game_id: String,
+) -> CmdResult<()> {
+    let root = install_root(&state, &game_id).await?;
+    jobs::begin(&state, &game_id, JobKind::Uninstall)?;
+    jobs::spawn_uninstall(app, game_id, root);
+    Ok(())
+}
+
+/// Pause (cancel) the running job. Installs and updates resume from where they stopped.
+#[tauri::command]
+pub fn pause_job(state: State<'_, AppState>, game_id: String) -> CmdResult<()> {
+    if let Some(j) = state.jobs.lock().unwrap().get(&game_id) {
+        if j.kind == JobKind::Uninstall {
+            return Err(CmdError::new("busy", "Uninstall can't be paused."));
+        }
+        j.cancel.cancel();
+    }
+    Ok(())
+}
+
+/// Forget a game whose folder was deleted outside the launcher.
+#[tauri::command]
+pub async fn forget_install(state: State<'_, AppState>, game_id: String) -> CmdResult<()> {
+    let mut reg = state.registry.lock().await;
+    reg.remove(&game_id);
+    reg.save()?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn launch_game(state: State<'_, AppState>, game_id: String) -> CmdResult<()> {
+    if state.job_running(&game_id).is_some() {
+        return Err(CmdError::new(
+            "busy",
+            "Wait for the current task to finish.",
+        ));
+    }
+    let root = install_root(&state, &game_id).await?;
+    let Some((_, m)) = install::installed_manifest(&root)? else {
+        return Err(CmdError::new(
+            "not_installed",
+            "This game is not installed.",
+        ));
+    };
+    let device_id = state.device_id();
+    let device_name = std::env::var("COMPUTERNAME").unwrap_or_default();
+    let token = state
+        .authed(|at| {
+            let api = state.api.clone();
+            let gid = game_id.clone();
+            let (did, dname) = (device_id.clone(), device_name.clone());
+            async move { api.launch_token(&at, &gid, &did, &dname).await }
+        })
+        .await?;
+    install::launch(&root, &m, &token.token, state.api.base())
+        .map_err(|e| CmdError::new("launch_failed", format!("{e:#}")))?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------- misc
+
+#[tauri::command]
+pub fn open_url(url: String) -> CmdResult<()> {
+    let u = url::Url::parse(&url).map_err(|_| CmdError::new("bad_url", "Invalid link."))?;
+    if !matches!(u.scheme(), "https" | "http") {
+        return Err(CmdError::new("bad_url", "Only web links can be opened."));
+    }
+    open::that_detached(u.as_str())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn open_install_folder(state: State<'_, AppState>, game_id: String) -> CmdResult<()> {
+    let root = install_root(&state, &game_id).await?;
+    open::that_detached(&root)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_settings(state: State<'_, AppState>) -> CmdResult<Settings> {
+    Ok(state.settings.lock().await.clone())
+}
+
+#[tauri::command]
+pub async fn set_settings(state: State<'_, AppState>, settings: Settings) -> CmdResult<()> {
+    if !settings.library_dir.is_absolute() {
+        return Err(CmdError::new(
+            "bad_folder",
+            "The library folder must be a full path.",
+        ));
+    }
+    let mut s = settings;
+    s.parallel_downloads = s.parallel_downloads.clamp(1, 32);
+    *state.settings.lock().await = s;
+    state.save_settings().await?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------- launcher self-update
+
+#[derive(Serialize)]
+pub struct LauncherUpdate {
+    version: String,
+    notes: Option<String>,
+    date: Option<String>,
+}
+
+#[tauri::command]
+pub async fn check_launcher_update(app: AppHandle) -> CmdResult<Option<LauncherUpdate>> {
+    let updater = app
+        .updater()
+        .map_err(|e| CmdError::new("updater", e.to_string()))?;
+    match updater.check().await {
+        Ok(Some(u)) => Ok(Some(LauncherUpdate {
+            version: u.version.clone(),
+            notes: u.body.clone(),
+            date: u.date.map(|d| d.to_string()),
+        })),
+        Ok(None) => Ok(None),
+        Err(e) => Err(CmdError::new("updater", e.to_string())),
+    }
+}
+
+#[tauri::command]
+pub async fn install_launcher_update(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
+    if !state.jobs.lock().unwrap().is_empty() {
+        return Err(CmdError::new(
+            "busy",
+            "Pause or finish downloads before updating the launcher.",
+        ));
+    }
+    let updater = app
+        .updater()
+        .map_err(|e| CmdError::new("updater", e.to_string()))?;
+    let Some(update) = updater
+        .check()
+        .await
+        .map_err(|e| CmdError::new("updater", e.to_string()))?
+    else {
+        return Ok(());
+    };
+    let mut downloaded: u64 = 0;
+    let handle = app.clone();
+    update
+        .download_and_install(
+            move |chunk, total| {
+                downloaded += chunk as u64;
+                let _ = handle.emit(
+                    "launcher-update-progress",
+                    serde_json::json!({ "downloaded": downloaded, "total": total }),
+                );
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| CmdError::new("updater", e.to_string()))?;
+    app.restart();
+}
+
+pub fn cancel_all_jobs(app: &AppHandle) -> bool {
+    let state = app.state::<AppState>();
+    let jobs = state.jobs.lock().unwrap();
+    for j in jobs.values() {
+        j.cancel.cancel();
+    }
+    !jobs.is_empty()
+}

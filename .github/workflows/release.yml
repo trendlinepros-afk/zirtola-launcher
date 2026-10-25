@@ -1,0 +1,92 @@
+name: Release
+
+# Push a tag like v0.2.0 (matching package.json's version) to build, sign and
+# publish the installer and the auto-update feed as a DRAFT GitHub Release.
+# Review the draft and click Publish: installed launchers only see the update
+# once the release is published. See docs/RELEASING.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      # Authenticode signing (scripts/sign.ps1). Unset = unsigned build.
+      ZIRTOLA_SIGN_MODE: ${{ vars.ZIRTOLA_SIGN_MODE }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+      AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+      AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+      # Production website API the launcher talks to (baked in at build time).
+      ZIRTOLA_API_BASE: ${{ vars.ZIRTOLA_API_BASE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ("v$v" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} does not match package.json version $v" }
+
+      - name: Require the updater signing key
+        shell: pwsh
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if (-not $env:KEY) { throw "Add the TAURI_SIGNING_PRIVATE_KEY secret (see docs/RELEASING.md)" }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Secret scan
+        run: node scripts/check-secrets.mjs
+
+      - name: Tests
+        run: cargo test --workspace --locked
+
+      - name: Install the Azure Artifact Signing client
+        if: env.ZIRTOLA_SIGN_MODE == 'azure'
+        run: cargo install artifact-signing-cli --locked
+
+      - name: Build, sign and draft the release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Zirtola Launcher ${{ github.ref_name }}"
+          releaseBody: "See CHANGELOG.md for what changed."
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
+          args: --config {"bundle":{"createUpdaterArtifacts":true}}
+
+      - name: Verify the Authenticode signature
+        if: env.ZIRTOLA_SIGN_MODE != '' && env.ZIRTOLA_SIGN_MODE != 'none'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          $sig = Get-AuthenticodeSignature $exe.FullName
+          "$($exe.Name): $($sig.Status) $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne "Valid") { throw "Installer signature is $($sig.Status)" }

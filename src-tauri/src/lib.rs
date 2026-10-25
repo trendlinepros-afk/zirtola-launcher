@@ -2,20 +2,29 @@
 
 mod auth;
 mod commands;
+mod crash;
+mod hardware;
 mod jobs;
+mod reports;
 mod state;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // A second start (e.g. the website's zirtola://refresh link) is
+            // forwarded here: refresh the running launcher and bring it forward.
+            if let Some(link) = commands::deep_link_arg(args) {
+                let _ = app.emit("deep-link", link);
+            }
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.unminimize();
                 let _ = w.show();
                 let _ = w.set_focus();
             }
         }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
@@ -71,6 +80,11 @@ pub fn run() {
             commands::set_settings,
             commands::check_launcher_update,
             commands::install_launcher_update,
+            commands::startup_deep_link,
+            commands::hardware_report,
+            commands::pending_crashes,
+            commands::send_crash_report,
+            commands::dismiss_crash,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Zirtola Launcher");

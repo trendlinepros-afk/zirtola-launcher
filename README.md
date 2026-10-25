@@ -10,6 +10,14 @@ the website), and download, update, verify and play the games they own.
 | --- | --- | --- |
 | ![Sign in](docs/screenshots/sign-in.png) | ![Downloading](docs/screenshots/downloading.png) | ![Patching](docs/screenshots/patching.png) |
 
+| Locked game | Waiting for the purchase | Bought: ready to install |
+| --- | --- | --- |
+| ![Locked](docs/screenshots/locked-game.png) | ![Waiting](docs/screenshots/waiting-for-purchase.png) | ![Ready](docs/screenshots/purchase-ready.png) |
+
+| Crash report prompt | Privacy settings |
+| --- | --- |
+| ![Crash report](docs/screenshots/crash-dialog.png) | ![Privacy](docs/screenshots/settings-privacy.png) |
+
 ## Features
 
 - **Sign in with the website account**: OAuth 2.0 authorization code + PKCE in
@@ -32,6 +40,18 @@ the website), and download, update, verify and play the games they own.
 - **Launch with a license token**: a 5-minute token in the game's environment
   (`ZIRTOLA_SESSION_TOKEN`) so the game can check its license; each launch
   records the device so the studio can see and reset activations.
+- **Buying**: locked games show a lock badge and "Buy on the website" (with the
+  price when the site provides one). After the player clicks it, the launcher
+  waits for the purchase (re-checking every 7 s for up to 15 minutes, right away
+  when the window regains focus, and on the site's `zirtola://refresh` link) and
+  highlights the game with Install as soon as it is owned.
+- **Hardware info** (opt-out, Settings → Privacy, with a "Show what is sent"
+  view): OS version/build, CPU, RAM, GPUs with VRAM and driver, displays, free
+  space on the install drive, launcher version. Nothing identifying.
+- **Crash reports**: when a game crashes (non-zero exit or a new Unreal crash
+  folder) the player is asked whether to send the log, crash context and
+  minidump with an optional comment. Games can also report directly
+  (CrashReportClient or a small upload), see docs/GAME_INTEGRATION.md.
 - **Self-update** from GitHub Releases (`latest.json`), offered in the sidebar.
 - **Controller-friendly**: D-pad/stick move focus, A select, B back, LB/RB
   switch game, Start play/install, Y redeem key, View settings; button hints

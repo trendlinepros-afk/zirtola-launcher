@@ -57,6 +57,13 @@ pub struct GameArt {
     pub cover_url: Option<String>,
 }
 
+/// A price in minor units (cents), e.g. `{ "amount": 1999, "currency": "usd" }`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Price {
+    pub amount: i64,
+    pub currency: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogGame {
     pub id: String,
@@ -72,6 +79,9 @@ pub struct CatalogGame {
     #[serde(default)]
     pub install_size: Option<u64>,
     pub art: GameArt,
+    /// Shown on the "Buy on the website" button when the website provides it.
+    #[serde(default)]
+    pub price: Option<Price>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -347,6 +357,46 @@ impl ApiClient {
             path.push_str(v);
         }
         self.get(&path, Some(at)).await
+    }
+
+    /// Report this PC's hardware (only when the player allows it).
+    pub async fn post_hardware(
+        &self,
+        at: &str,
+        report: &serde_json::Value,
+    ) -> Result<(), ApiError> {
+        self.post::<_, serde_json::Value>("/v1/hardware", Some(at), report)
+            .await
+            .map(|_| ())
+    }
+
+    /// Upload a crash report: JSON metadata plus a zip of the crash folder.
+    pub async fn post_crash(
+        &self,
+        at: &str,
+        metadata: &serde_json::Value,
+        zip: Vec<u8>,
+    ) -> Result<String, ApiError> {
+        let mut form = reqwest::multipart::Form::new().text("metadata", metadata.to_string());
+        if !zip.is_empty() {
+            let part = reqwest::multipart::Part::bytes(zip)
+                .file_name("crash.zip")
+                .mime_str("application/zip")?;
+            form = form.part("file", part);
+        }
+        let resp = self
+            .http
+            .post(self.url("/v1/crashes"))
+            .bearer_auth(at)
+            .timeout(Duration::from_secs(300))
+            .multipart(form)
+            .send()
+            .await?;
+        let v: serde_json::Value = Self::decode(resp).await?;
+        Ok(v.get("id")
+            .and_then(|x| x.as_str())
+            .unwrap_or_default()
+            .to_string())
     }
 
     /// Request a launch token. `device_id` is the launcher's random install id

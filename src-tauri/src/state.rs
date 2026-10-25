@@ -35,6 +35,7 @@ pub fn api_base() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     /// Default parent folder for new installs.
     pub library_dir: PathBuf,
@@ -42,6 +43,10 @@ pub struct Settings {
     pub parallel_downloads: usize,
     /// Check for a launcher update at start-up.
     pub auto_update_launcher: bool,
+    /// Send the hardware summary (see hardware.rs) to the website.
+    pub share_hardware_info: bool,
+    /// Ask to send a crash report when a game crashes.
+    pub offer_crash_reports: bool,
 }
 
 impl Default for Settings {
@@ -51,6 +56,8 @@ impl Default for Settings {
             library_dir: PathBuf::from(format!("{drive}\\Zirtola Games")),
             parallel_downloads: 8,
             auto_update_launcher: true,
+            share_hardware_info: true,
+            offer_crash_reports: true,
         }
     }
 }
@@ -85,6 +92,10 @@ pub struct AppState {
     pub settings: Mutex<Settings>,
     pub jobs: std::sync::Mutex<HashMap<String, Job>>,
     pub login_cancel: std::sync::Mutex<Option<CancellationToken>>,
+    /// Crash reports waiting for the player's decision, by id.
+    pub crashes: std::sync::Mutex<HashMap<String, crate::crash::CrashCandidate>>,
+    /// Last collected hardware report (for the device label and Settings).
+    pub hardware: std::sync::Mutex<Option<crate::hardware::HardwareReport>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -150,6 +161,8 @@ impl AppState {
             session: Mutex::new(None),
             jobs: std::sync::Mutex::new(HashMap::new()),
             login_cancel: std::sync::Mutex::new(None),
+            crashes: std::sync::Mutex::new(HashMap::new()),
+            hardware: std::sync::Mutex::new(None),
         })
     }
 
@@ -290,6 +303,33 @@ impl AppState {
         let id = zirtola_core::b64::encode_url(&buf);
         let _ = std::fs::write(&path, &id);
         id
+    }
+
+    /// Crash folders the player already decided about (sent or dismissed).
+    pub fn crash_seen(&self) -> std::collections::HashSet<String> {
+        std::fs::read(self.data_dir.join("crash-seen.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn mark_crash_seen(&self, key: &str) {
+        let mut seen = self.crash_seen();
+        seen.insert(key.to_string());
+        let _ = std::fs::write(
+            self.data_dir.join("crash-seen.json"),
+            serde_json::to_vec(&seen).unwrap_or_default(),
+        );
+    }
+
+    /// Non-identifying device label for the activations list ("Windows 11 Pro · RTX 3070").
+    pub fn device_label(&self) -> String {
+        self.hardware
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|h| h.label())
+            .unwrap_or_else(|| "Windows PC".into())
     }
 
     pub fn job_running(&self, game_id: &str) -> Option<JobKind> {

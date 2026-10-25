@@ -23,6 +23,15 @@ export function duration(s: number | null | undefined): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+export function price(p: { amount: number; currency: string } | null | undefined): string {
+  if (!p || !Number.isFinite(p.amount)) return "";
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency: p.currency.toUpperCase() }).format(p.amount / 100);
+  } catch {
+    return `${(p.amount / 100).toFixed(2)} ${p.currency.toUpperCase()}`;
+  }
+}
+
 export function statusLabel(status: string): string {
   switch (status) {
     case "released":

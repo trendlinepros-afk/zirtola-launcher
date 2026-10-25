@@ -37,12 +37,16 @@ pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> CmdResult<A
 // ---------------------------------------------------------------- account
 
 #[tauri::command]
-pub async fn restore_session(state: State<'_, AppState>) -> CmdResult<Option<Me>> {
-    state.restore_session().await
+pub async fn restore_session(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Option<Me>> {
+    let me = state.restore_session().await?;
+    if me.is_some() {
+        tauri::async_runtime::spawn(crate::reports::report_hardware_if_needed(app));
+    }
+    Ok(me)
 }
 
 #[tauri::command]
-pub async fn sign_in(state: State<'_, AppState>) -> CmdResult<Me> {
+pub async fn sign_in(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Me> {
     let cfg = state.config().await?;
     let cancel = CancellationToken::new();
     if let Some(old) = state.login_cancel.lock().unwrap().replace(cancel.clone()) {
@@ -54,7 +58,9 @@ pub async fn sign_in(state: State<'_, AppState>) -> CmdResult<Me> {
             Ok(api) => CmdError::from(api),
             Err(e) => CmdError::new("sign_in_failed", format!("{e:#}")),
         })?;
-    state.start_session(tokens).await
+    let me = state.start_session(tokens).await?;
+    tauri::async_runtime::spawn(crate::reports::report_hardware_if_needed(app));
+    Ok(me)
 }
 
 #[tauri::command]
@@ -397,7 +403,12 @@ pub async fn forget_install(state: State<'_, AppState>, game_id: String) -> CmdR
 }
 
 #[tauri::command]
-pub async fn launch_game(state: State<'_, AppState>, game_id: String) -> CmdResult<()> {
+pub async fn launch_game(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    game_id: String,
+    title: Option<String>,
+) -> CmdResult<()> {
     if state.job_running(&game_id).is_some() {
         return Err(CmdError::new(
             "busy",
@@ -412,7 +423,8 @@ pub async fn launch_game(state: State<'_, AppState>, game_id: String) -> CmdResu
         ));
     };
     let device_id = state.device_id();
-    let device_name = std::env::var("COMPUTERNAME").unwrap_or_default();
+    // A hardware label, not the computer name (which often contains the user's name).
+    let device_name = state.device_label();
     let token = state
         .authed(|at| {
             let api = state.api.clone();
@@ -421,9 +433,34 @@ pub async fn launch_game(state: State<'_, AppState>, game_id: String) -> CmdResu
             async move { api.launch_token(&at, &gid, &did, &dname).await }
         })
         .await?;
-    install::launch(&root, &m, &token.token, state.api.base())
+    let child = install::launch(&root, &m, &token.token, state.api.base())
         .map_err(|e| CmdError::new("launch_failed", format!("{e:#}")))?;
+    let title = title.unwrap_or_else(|| m.game_id.clone());
+    crate::reports::watch_game(app, child, root, m, title);
     Ok(())
+}
+
+// ---------------------------------------------------------------- hardware & crash reports
+
+/// Exactly what "Share hardware info" sends (shown in Settings).
+#[tauri::command]
+pub async fn hardware_report(app: AppHandle) -> CmdResult<serde_json::Value> {
+    Ok(serde_json::to_value(crate::reports::collect(&app).await).unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn pending_crashes(app: AppHandle) -> CmdResult<Vec<crate::crash::CrashCandidate>> {
+    Ok(crate::reports::pending_crashes(&app).await)
+}
+
+#[tauri::command]
+pub async fn send_crash_report(app: AppHandle, id: String, comment: String) -> CmdResult<String> {
+    crate::reports::send(&app, &id, &comment).await
+}
+
+#[tauri::command]
+pub fn dismiss_crash(app: AppHandle, id: String) {
+    crate::reports::dismiss(&app, &id);
 }
 
 // ---------------------------------------------------------------- misc
@@ -434,8 +471,23 @@ pub fn open_url(url: String) -> CmdResult<()> {
     if !matches!(u.scheme(), "https" | "http") {
         return Err(CmdError::new("bad_url", "Only web links can be opened."));
     }
+    if dev_mode() && std::env::var_os("ZIRTOLA_NO_BROWSER").is_some() {
+        eprintln!("ZIRTOLA_OPEN_URL={u}");
+        return Ok(());
+    }
     open::that_detached(u.as_str())?;
     Ok(())
+}
+
+/// A `zirtola://` link the launcher was started with (Windows passes it as an argument).
+#[tauri::command]
+pub fn startup_deep_link() -> Option<String> {
+    deep_link_arg(std::env::args())
+}
+
+pub fn deep_link_arg<I: IntoIterator<Item = String>>(args: I) -> Option<String> {
+    args.into_iter()
+        .find(|a| a.starts_with("zirtola://") && a.len() < 512)
 }
 
 #[tauri::command]
@@ -451,7 +503,11 @@ pub async fn get_settings(state: State<'_, AppState>) -> CmdResult<Settings> {
 }
 
 #[tauri::command]
-pub async fn set_settings(state: State<'_, AppState>, settings: Settings) -> CmdResult<()> {
+pub async fn set_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: Settings,
+) -> CmdResult<()> {
     if !settings.library_dir.is_absolute() {
         return Err(CmdError::new(
             "bad_folder",
@@ -460,8 +516,12 @@ pub async fn set_settings(state: State<'_, AppState>, settings: Settings) -> Cmd
     }
     let mut s = settings;
     s.parallel_downloads = s.parallel_downloads.clamp(1, 32);
+    let turned_on = s.share_hardware_info && !state.settings.lock().await.share_hardware_info;
     *state.settings.lock().await = s;
     state.save_settings().await?;
+    if turned_on {
+        tauri::async_runtime::spawn(crate::reports::report_hardware_if_needed(app));
+    }
     Ok(())
 }
 

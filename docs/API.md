@@ -84,9 +84,18 @@ Games the launcher lists (published and visible in the launcher).
   "platforms": ["win64"],
   "latest_version": "1.0.1",           // live build on win64/live, or null
   "install_size": 389210112,           // bytes, or null
-  "art": { "accent": "#FFCD00", "cover_url": "https://…/key-art.jpg" }
+  "art": { "accent": "#FFCD00", "cover_url": "https://…/key-art.jpg" },
+  "price": { "amount": 2499, "currency": "usd" }   // optional, minor units; shown on "Buy on the website"
 } ] }
 ```
+
+**Buying from the launcher.** A locked game's button reads "Buy on the website · $24.99"
+(price when provided) and opens `store_url`. The launcher remembers the game as a
+pending purchase and, while it is pending, re-fetches `/v1/entitlements` every 7 s
+for up to 15 minutes, immediately when the window regains focus, and on a
+`zirtola://refresh[?game=<id>]` link (registered by the installer). As soon as the
+entitlement shows up the game is highlighted with Install ready. Any page the site
+shows after granting a licence can link to `zirtola://refresh?game=<id>`.
 
 ## Sign-in: OAuth 2.0 authorization code + PKCE
 
@@ -256,6 +265,53 @@ The launcher passes it to the game in the environment (see GAME_INTEGRATION.md).
 
 For games that prefer an online check: `{ "token": "…" }` →
 `{ "valid": true, "claims": { … } }` or `{ "valid": false, "claims": null }`.
+
+### `POST {base}/v1/hardware`
+
+Sent on sign-in and when the hardware changes, only if the player leaves
+"Share hardware info" on (default on, Settings → Privacy). Exactly these fields:
+
+```json
+{
+  "device_id": "<random install id>",
+  "os": { "name": "Windows 11 Pro", "version": "24H2", "build": "26100.2314" },
+  "cpu": { "model": "AMD Ryzen 7 7800X3D 8-Core Processor", "cores": 8, "threads": 16 },
+  "ram_mb": 32768,
+  "gpus": [ { "name": "NVIDIA GeForce RTX 4070", "vram_mb": 12282, "driver": "32.0.15.6094" } ],
+  "displays": [ { "width": 2560, "height": 1440, "scale": 1.0, "refresh_hz": 0 } ],
+  "install_drive_free_mb": 812345,
+  "launcher_version": "0.1.0"
+}
+```
+
+No serial numbers, MAC addresses, user or computer names, or file paths. → `{ "ok": true }`.
+
+### `POST {base}/v1/crashes`
+
+`multipart/form-data` with `metadata` (JSON) and `file` (zip of the Unreal crash
+folder: `*.log` (last 8 MB), `CrashContext.runtime-xml`, `*.dmp` up to 40 MB;
+total under 48 MB). Sent only after the player clicks "Send report".
+
+```json
+{ "source": "launcher", "game_id": "dirt-simulator", "game_version": "1.0.1", "build_id": "4f68…",
+  "platform": "win64", "device_id": "…", "exit_code": 3, "comment": "optional, from the player",
+  "crash_guid": "UECC-Windows-…_0000", "hardware": { …same shape as /v1/hardware, or {} if sharing is off… } }
+```
+
+→ `201 { "id": "…" }`. The server reads the error message and callstack from
+`CrashContext.runtime-xml` (or the log) and groups reports by a hash of the
+normalised top frames. `413 too_large`, `429 slow_down` (20 per hour per account).
+
+### Crash reports without the launcher (website only)
+
+- `POST {site}/api/crash/upload?key=<game crash key>`: same multipart body as
+  above, sent by the game itself; include `launch_token` (the
+  `ZIRTOLA_SESSION_TOKEN` it was started with) in `metadata` to tie it to the player.
+- `POST {site}/api/crash/ue?key=<game crash key>`: Unreal's CrashReportClient
+  `DataRouterUrl` target (compressed crash archive; unpacked best-effort, always stored).
+
+The crash key is per game (Studio → Licensing → Launcher catalogue). See
+GAME_INTEGRATION.md.
 
 ## Publishing builds (website only)
 

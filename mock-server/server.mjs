@@ -11,7 +11,7 @@
 //      MOCK_AUTO_APPROVE (account id: approve sign-ins without showing the picker).
 import http from "node:http";
 import crypto from "node:crypto";
-import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   DATA, HERE, b64url, ensureKey, publicJwk, randomToken, readJson, sha256, signJwt, verifyJwt, writeJson,
@@ -42,6 +42,7 @@ const refreshTokens = new Map(); // token -> { account, family, used }
 const revokedFamilies = new Set();
 const deviceCodes = new Map(); // device_code -> { user_code, account|null, exp, interval }
 const activations = {}; // "<account>:<game>" -> Map(device_id -> { name, last })
+const hardware = {}; // "<account>:<device_id>" -> last hardware report (in memory)
 
 const now = () => Math.floor(Date.now() / 1000);
 const account = (id) => fixtures.accounts.find((a) => a.id === id);
@@ -331,6 +332,7 @@ function catalog() {
         latest_version: v,
         install_size: lm ? lm.m.total_size : null,
         art: g.art,
+        price: g.price ?? null,
       };
     }),
   };
@@ -408,6 +410,8 @@ function serveChunk(req, res, gameId, prefix, hash, query) {
   req.on("close", () => stream.destroy());
 }
 
+const money = (p) => (p ? `$${(p.amount / 100).toFixed(2)}` : "free");
+
 function storePage(res, gameId) {
   const g = game(gameId);
   if (!g) return send(res, 404, pageShell("Not found", "<h1>Not found</h1>"));
@@ -416,10 +420,69 @@ function storePage(res, gameId) {
     200,
     pageShell(
       g.title,
-      `<div class="banner">Mock store page. The real website sells the game here.</div><h1>${esc(g.title)}</h1><p>${esc(g.description)}</p>
+      `<div class="banner">Mock store page. No payment: pick who "buys" it.</div><h1>${esc(g.title)}</h1><p>${esc(g.description)}</p>
+${fixtures.accounts
+  .map(
+    (a) => `<form method="post" action="/store/${esc(g.id)}/buy"><input type="hidden" name="account" value="${esc(a.id)}">
+<button type="submit">Buy for ${money(g.price)} as ${esc(a.display_name)}<small>${owns(a.id, g.id) ? "already owns it" : "does not own it yet"}</small></button></form>`,
+  )
+  .join("")}
 <p>Demo keys: ${fixtures.keys.filter((k) => k.game_id === g.id).map((k) => `<code>${esc(k.key)}</code>`).join(", ")}</p>`,
     ),
   );
+}
+
+// Mock checkout: grants a purchase entitlement, then shows the same
+// "return to the launcher" page the real website shows after a licence is granted.
+async function storeBuy(req, res, gameId) {
+  const g = game(gameId);
+  const { account: acct } = await readBody(req);
+  if (!g || !account(acct)) return send(res, 400, pageShell("Error", "<h1>Unknown game or account</h1>"));
+  if (!owns(acct, g.id)) {
+    (state.extra_entitlements[acct] ||= []).push({ game_id: g.id, kind: "purchase", granted_at: new Date().toISOString() });
+    saveState();
+  }
+  send(res, 200, pageShell("Ready", readyBody(g)));
+}
+
+function readyBody(g) {
+  const link = `zirtola://refresh?game=${encodeURIComponent(g.id)}`;
+  return `<h1>Your game is ready</h1><p>Return to the Zirtola Launcher; ${esc(g.title)} is ready to install.</p>
+<a class="btn" href="${esc(link)}" style="text-align:center;background:#e3a33b;color:#0d1014;border-color:#e3a33b;font-weight:700">Open the Zirtola Launcher</a>
+<p style="margin-top:14px;font-size:13px">The launcher notices the purchase by itself within a few seconds; the button just brings it forward.</p>`;
+}
+
+// Crash reports: multipart "metadata" (JSON) + "file" (zip). Saved under
+// .data/crashes/<id>.zip and <id>.json for inspection.
+async function crashUpload(req, res, acct) {
+  const chunks = [];
+  let size = 0;
+  for await (const c of req) {
+    size += c.length;
+    if (size > 60 * 1024 * 1024) return err(res, 413, "too_large", "Crash report is too large.");
+    chunks.push(c);
+  }
+  let form;
+  try {
+    form = await new Request("http://mock/upload", { method: "POST", headers: { "content-type": req.headers["content-type"] || "" }, body: Buffer.concat(chunks) }).formData();
+  } catch {
+    return err(res, 400, "bad_request", "Expected multipart/form-data.");
+  }
+  let meta;
+  try {
+    meta = JSON.parse(String(form.get("metadata") || "{}"));
+  } catch {
+    return err(res, 400, "bad_request", "metadata must be JSON.");
+  }
+  if (!game(meta.game_id)) return err(res, 404, "not_found", "Unknown game.");
+  const id = randomToken(9);
+  const dir = join(DATA, "crashes");
+  mkdirSync(dir, { recursive: true });
+  const file = form.get("file");
+  if (file && typeof file === "object") writeFileSync(join(dir, `${id}.zip`), Buffer.from(await file.arrayBuffer()));
+  writeFileSync(join(dir, `${id}.json`), JSON.stringify({ account: acct, received_at: new Date().toISOString(), ...meta }, null, 2));
+  console.log(`[mock] crash report ${id} for ${meta.game_id} ${meta.game_version} from ${acct}`);
+  send(res, 201, { id });
 }
 
 // ------------------------------------------------------------------ router
@@ -461,6 +524,7 @@ const server = http.createServer(async (req, res) => {
       return serveChunk(req, res, r[1], r[2], r[3], url.searchParams);
     }
     if (req.method === "GET" && (r = m(/^\/store\/([a-z0-9-]+)$/))) return storePage(res, r[1]);
+    if (req.method === "POST" && (r = m(/^\/store\/([a-z0-9-]+)\/buy$/))) return storeBuy(req, res, r[1]);
     if (req.method === "GET" && ["/store", "/account", "/support"].includes(p)) {
       return send(res, 200, pageShell("Zirtola", `<div class="banner">Mock website page: ${esc(p)}</div><h1>Zirtola</h1><p>The real website goes here.</p>`));
     }
@@ -492,6 +556,15 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { entitlements: entitlementsFor(acct) });
       }
       if (req.method === "POST" && p === "/v1/keys/redeem") return redeem(req, res, acct);
+      if (req.method === "POST" && p === "/v1/hardware") {
+        const body = await readBody(req);
+        if (!/^[A-Za-z0-9_-]{16,128}$/.test(String(body.device_id || ""))) return err(res, 400, "bad_request", "device_id is required.");
+        hardware[`${acct}:${body.device_id}`] = { ...body, reported_at: new Date().toISOString() };
+        console.log(`[mock] hardware from ${acct}: ${body.os?.name ?? "?"} / ${body.gpus?.[0]?.name ?? "?"}`);
+        return send(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && p === "/v1/crashes") return crashUpload(req, res, acct);
+      if (req.method === "GET" && p === "/v1/dev/hardware") return send(res, 200, hardware);
       if (req.method === "POST" && p === "/v1/launch-tokens") {
         const { game_id, device_id, device_name } = await readBody(req);
         if (!game(game_id)) return err(res, 404, "not_found", "Unknown game.");

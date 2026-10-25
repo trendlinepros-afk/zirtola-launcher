@@ -144,6 +144,21 @@ try {
   ok(good.includes("LICENSE OK"), "reference game accepts the token");
   const wrong = run({ ZIRTOLA_SESSION_TOKEN: lt.body.token, ZIRTOLA_GAME_ID: "dirt-simulator", ZIRTOLA_API_BASE: BASE });
   ok(wrong.includes("NOT LICENSED"), "reference game rejects a token for another game");
+
+  // Prices, hardware report, crash upload.
+  ok(cat.body.games.every((g) => g.price && g.price.amount > 0), "catalog carries prices");
+  const device = b64url(crypto.randomBytes(24));
+  const hw = await json("/v1/hardware", { method: "POST", ...H(fresh.access_token), body: JSON.stringify({ device_id: device, os: { name: "Windows 11 Pro", version: "24H2", build: "26100.1" }, cpu: { model: "Test CPU", cores: 8, threads: 16 }, ram_mb: 32768, gpus: [{ name: "Test GPU", vram_mb: 8192, driver: "1.2.3.4" }], displays: [], launcher_version: "0.1.0" }) });
+  ok(hw.status === 200, "hardware report accepted");
+  const form = new FormData();
+  form.set("metadata", JSON.stringify({ source: "launcher", game_id: "alaskan-bush-simulator", game_version: "1.0.0", device_id: device, exit_code: 3, comment: "e2e" }));
+  form.set("file", new Blob([Buffer.from("PK\x05\x06" + "\0".repeat(18), "latin1")], { type: "application/zip" }), "crash.zip");
+  const cr = await fetch(`${BASE}/v1/crashes`, { method: "POST", headers: { Authorization: `Bearer ${fresh.access_token}` }, body: form });
+  ok(cr.status === 201, "crash report upload accepted");
+  const buy = await fetch(`${BASE}/store/dirt-simulator/buy`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "account=acct_new" });
+  ok(buy.status === 200 && (await buy.text()).includes("zirtola://refresh?game=dirt-simulator"), "mock checkout shows the return-to-launcher link");
+  const after = await json("/v1/entitlements", H(fresh.access_token));
+  ok(after.body.entitlements.some((e) => e.game_id === "dirt-simulator" && e.kind === "purchase"), "purchase shows up in entitlements right away");
 } finally {
   server.kill();
   rmSync(stateDir, { recursive: true, force: true });

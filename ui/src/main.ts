@@ -4,6 +4,9 @@ import {
   api,
   errorCode,
   errorMessage,
+  onDeepLink,
+  onGameCrashed,
+  type CrashCandidate,
   onJobFinished,
   onJobProgress,
   onLauncherUpdateProgress,
@@ -37,6 +40,10 @@ const S = {
   launcherUpdate: null as { version: string; notes: string | null } | null,
   launcherUpdating: null as { downloaded: number; total: number | null } | null,
   gamepad: false,
+  // Purchases the player started from the launcher: game id -> start time.
+  pending: new Map<string, number>(),
+  // Games that became owned while the launcher was open (highlighted).
+  justOwned: new Set<string>(),
 };
 
 // ------------------------------------------------------------------ dom helpers
@@ -71,6 +78,7 @@ function btn(id: string, label: string, onclick: () => void, opts: { cls?: strin
 }
 
 const app = document.getElementById("app")!;
+let lastRefresh = Date.now();
 
 function render() {
   const focused = (document.activeElement as HTMLElement | null)?.dataset?.id;
@@ -362,19 +370,26 @@ function updateProgressDom(p: JobProgress) {
   return true;
 }
 
+function buyLabel(g: CatalogGame): string {
+  const price = fmt.price(g.price);
+  return price ? `Buy on the website · ${price}` : "Buy on the website";
+}
+
 function actions(lg: LibraryGame) {
   const g = lg.game;
   const inst = lg.install;
   const row = h("div", { class: "actions" });
   if (!lg.owned) {
+    if (S.pending.has(g.id)) return waitingPanel(g);
     row.append(
-      btn("store", "Get it on the store", () => api.openUrl(g.store_url), { cls: "primary big", icon: icons.external }),
+      btn("store", buyLabel(g), () => buy(g), { cls: "primary big", icon: icons.store }),
       btn("redeem", "Redeem a key", () => redeemDialog(), { cls: "ghost big", icon: icons.key }),
     );
     return row;
   }
   if (!inst) {
     row.append(btn("install", "Install", () => installDialog(lg), { cls: "primary big", icon: icons.download }));
+    if (S.justOwned.has(g.id)) row.append(h("span", { class: "ready-note" }, h("span", { class: "ico", html: icons.check }), "Purchase complete. Ready to install."));
     return row;
   }
   if (inst.folder_missing) {
@@ -404,6 +419,102 @@ function actions(lg: LibraryGame) {
   return row;
 }
 
+// ------------------------------------------------------------------ buying
+
+// Games the player went to buy on the website. Remembered across restarts so a
+// launcher that was closed while buying still notices the new game.
+const PENDING_KEY = "zirtola.pendingPurchases";
+const PENDING_MAX_MS = 15 * 60_000;
+const PENDING_POLL_MS = 7_000;
+
+function loadPending(): Map<string, number> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PENDING_KEY) || "{}") as Record<string, number>;
+    return new Map(Object.entries(raw).filter(([, t]) => Date.now() - t < PENDING_MAX_MS));
+  } catch {
+    return new Map();
+  }
+}
+
+function savePending() {
+  try {
+    localStorage.setItem(PENDING_KEY, JSON.stringify(Object.fromEntries(S.pending)));
+  } catch {
+    /* storage unavailable: polling still works for this session */
+  }
+}
+
+function buy(g: CatalogGame) {
+  S.pending.set(g.id, Date.now());
+  savePending();
+  api.openUrl(g.store_url).catch(handleError);
+  render();
+  schedulePurchasePoll();
+}
+
+function stopWaiting(id: string) {
+  S.pending.delete(id);
+  savePending();
+  render();
+}
+
+function waitingPanel(g: CatalogGame) {
+  return h(
+    "div",
+    { class: "waiting-panel" },
+    h("div", { class: "spinner small" }),
+    h(
+      "div",
+      { class: "waiting-text" },
+      h("strong", {}, "Waiting for your purchase…"),
+      h("small", {}, "Finish buying on the website. The game appears here as soon as the purchase goes through."),
+    ),
+    btn("purchase-refresh", "Refresh", () => void refreshNow(), { cls: "ghost", icon: icons.update }),
+    btn("purchase-store", "", () => api.openUrl(g.store_url).catch(handleError), { cls: "ghost square", icon: icons.external, title: "Open the store page again" }),
+    btn("purchase-cancel", "", () => stopWaiting(g.id), { cls: "ghost square", icon: icons.close, title: "Stop waiting" }),
+  );
+}
+
+let pollTimer: number | undefined;
+
+// Poll entitlements every few seconds while a purchase is pending, for up to
+// 15 minutes per game, then stop.
+function schedulePurchasePoll() {
+  if (pollTimer !== undefined) return;
+  const tick = async () => {
+    pollTimer = undefined;
+    for (const [id, t] of S.pending) if (Date.now() - t > PENDING_MAX_MS) S.pending.delete(id);
+    savePending();
+    if (!S.pending.size || !S.me) {
+      render();
+      return;
+    }
+    await loadLibrary();
+    if (S.pending.size) pollTimer = window.setTimeout(tick, PENDING_POLL_MS);
+  };
+  pollTimer = window.setTimeout(tick, PENDING_POLL_MS);
+}
+
+// Called after every library load: pending games that are now owned get
+// highlighted and selected, with Install ready.
+function settlePurchases() {
+  for (const lg of S.library) {
+    if (lg.owned && S.pending.has(lg.game.id)) {
+      S.pending.delete(lg.game.id);
+      S.justOwned.add(lg.game.id);
+      S.selected = lg.game.id;
+      S.view = "library";
+      toast(`${lg.game.title} is yours. Ready to install.`);
+    }
+  }
+  savePending();
+}
+
+async function refreshNow() {
+  lastRefresh = Date.now();
+  await loadLibrary();
+}
+
 function primaryAction() {
   const g = selectedGame();
   if (!g || S.view !== "library" || g.job) return;
@@ -415,33 +526,43 @@ function shelf() {
   return h(
     "section",
     { class: "shelf" },
-    h("h2", {}, "Your games"),
+    h("h2", {}, "Games"),
     h(
       "div",
       { class: "shelf-row" },
       ...S.library.map((lg) => {
         const p = S.progress.get(lg.game.id);
+        const pending = !lg.owned && S.pending.has(lg.game.id);
+        const fresh = lg.owned && S.justOwned.has(lg.game.id);
         const badge = lg.job
           ? lg.job === "verify" ? "Verifying" : lg.job === "uninstall" ? "Uninstalling" : "Downloading"
-          : !lg.owned
-            ? "Not owned"
-            : lg.install?.update_available
-              ? "Update"
-              : lg.install?.version
-                ? "Installed"
-                : lg.install
-                  ? "Paused"
-                  : "Ready to install";
+          : pending
+            ? "Waiting for purchase…"
+            : !lg.owned
+              ? fmt.price(lg.game.price) || "Locked"
+              : fresh && !lg.install
+                ? "New · Ready to install"
+                : lg.install?.update_available
+                  ? "Update"
+                  : lg.install?.version
+                    ? "Installed"
+                    : lg.install
+                      ? "Paused"
+                      : "Ready to install";
+        const state = pending ? "pending" : !lg.owned ? "locked" : fresh ? "owned fresh" : "owned";
         return h(
           "button",
           {
-            class: `game-card ${lg.game.id === selectedGame()?.game.id ? "selected" : ""} ${lg.owned ? "" : "unowned"}`,
+            class: `game-card ${state} ${lg.game.id === selectedGame()?.game.id ? "selected" : ""}`,
             "data-id": `card-${lg.game.id}`,
             type: "button",
             style: `--accent:${lg.game.art.accent}`,
+            title: lg.owned ? `${lg.game.title} (owned)` : `${lg.game.title} (not owned)`,
             onclick: () => { S.selected = lg.game.id; render(); },
           },
           h("div", { class: "art", html: keyArt(lg.game.id, lg.game.art.accent, lg.game.title) }),
+          !lg.owned ? h("span", { class: "lock", html: pending ? icons.update : icons.lock, title: pending ? "Waiting for purchase" : "Not owned" }) : null,
+          lg.owned ? h("span", { class: "owned-tick", html: icons.check, title: "Owned" }) : null,
           h("div", { class: "card-text" }, h("strong", {}, lg.game.title), h("span", { class: "badge" }, badge)),
           p && p.total_bytes ? h("div", { class: "mini-bar" }, h("div", { style: `width:${(p.done_bytes / p.total_bytes) * 100}%` })) : null,
         );
@@ -461,7 +582,7 @@ async function run(fn: () => Promise<unknown>) {
 
 async function launch(g: CatalogGame) {
   try {
-    await api.launch(g.id);
+    await api.launch(g.id, g.title);
     toast(`Starting ${g.title}…`);
   } catch (e) {
     handleError(e);
@@ -492,6 +613,7 @@ async function loadLibrary() {
     S.library = [...lib.filter((g) => g.owned), ...lib.filter((g) => !g.owned)];
     if (!S.selected || !S.library.some((g) => g.game.id === S.selected)) S.selected = S.library[0]?.game.id ?? null;
     S.offline = null;
+    settlePurchases();
   } catch (e) {
     handleError(e);
   }
@@ -648,6 +770,10 @@ function settingsView() {
   par.addEventListener("change", () => save({ parallel_downloads: +par.value }));
   const auto = h("input", { type: "checkbox", "data-id": "auto-update", checked: s.auto_update_launcher }) as HTMLInputElement;
   auto.addEventListener("change", () => save({ auto_update_launcher: auto.checked }));
+  const hw = h("input", { type: "checkbox", "data-id": "share-hw", checked: s.share_hardware_info }) as HTMLInputElement;
+  hw.addEventListener("change", () => save({ share_hardware_info: hw.checked }));
+  const crashes = h("input", { type: "checkbox", "data-id": "offer-crash", checked: s.offer_crash_reports }) as HTMLInputElement;
+  crashes.addEventListener("change", () => save({ offer_crash_reports: crashes.checked }));
 
   return h(
     "div",
@@ -681,8 +807,121 @@ function settingsView() {
       ),
       S.info?.support_url ? h("div", { class: "setting" }, h("div", {}, h("strong", {}, "Help"), h("small", {}, "Support and known issues")), btn("support", "Open support", () => api.openUrl(S.info!.support_url!), { cls: "ghost", icon: icons.external })) : null,
     ),
+    h(
+      "section",
+      { class: "card" },
+      h("h3", {}, "Privacy"),
+      h(
+        "label",
+        { class: "setting" },
+        h(
+          "div",
+          {},
+          h("strong", {}, "Share hardware info"),
+          h("small", { class: "wrap" }, "Sends your Windows version, CPU, RAM, graphics card (memory and driver), display resolutions, free space on the install drive and the launcher version, so the studio knows what to optimise for. No serial numbers, network addresses, user or PC names, or file paths."),
+        ),
+        hw,
+      ),
+      h("div", { class: "setting" }, h("div", {}, h("strong", {}, "What is sent"), h("small", {}, "See the exact report from this PC.")), btn("show-hw", "Show", showHardware, { cls: "ghost" })),
+      h(
+        "label",
+        { class: "setting" },
+        h(
+          "div",
+          {},
+          h("strong", {}, "Offer to send crash reports"),
+          h("small", { class: "wrap" }, "When a game crashes, ask whether to send its crash log, crash details and memory dump (with an optional comment) to the studio. Nothing is sent without asking."),
+        ),
+        crashes,
+      ),
+      h("p", { class: "privacy-note" }, "Signing in also records each PC you play on as a random install id, so the studio can count and reset activations. See the privacy page on the website for details."),
+    ),
   );
 }
+
+async function showHardware() {
+  try {
+    const report = await api.hardwareReport();
+    modal(
+      "Hardware report",
+      h(
+        "div",
+        {},
+        h("p", { class: "muted" }, S.settings?.share_hardware_info ? "This is sent when you sign in and when it changes." : "Sharing is off: nothing is sent."),
+        h("pre", { class: "json" }, JSON.stringify(report, null, 2)),
+        h("div", { class: "modal-actions" }, btn("close-hw", "Close", () => void closeTopModal(), { cls: "primary" })),
+      ),
+    );
+  } catch (e) {
+    toast(errorMessage(e), "error");
+  }
+}
+
+// ------------------------------------------------------------------ crash reports
+
+const crashQueue: CrashCandidate[] = [];
+
+function queueCrash(c: CrashCandidate) {
+  if (crashQueue.some((x) => x.id === c.id)) return;
+  crashQueue.push(c);
+  if (crashQueue.length === 1) crashDialog(c);
+}
+
+function nextCrash() {
+  crashQueue.shift();
+  if (crashQueue[0]) setTimeout(() => crashDialog(crashQueue[0]!), 300);
+}
+
+function crashDialog(c: CrashCandidate) {
+  const title = S.library.find((g) => g.game.id === c.game_id)?.game.title ?? c.game_title;
+  const comment = h("textarea", { class: "text comment", rows: "3", maxlength: "2000", placeholder: "What were you doing when it crashed? (optional)", "data-id": "crash-comment" }) as HTMLTextAreaElement;
+  let done = false;
+  const sendBtn = btn("crash-send", "Send report", () => void send(), { cls: "primary" }) as HTMLButtonElement;
+  const send = async () => {
+    sendBtn.disabled = true;
+    sendBtn.textContent = "Sending...";
+    try {
+      await api.sendCrashReport(c.id, comment.value);
+      done = true;
+      close();
+      toast("Crash report sent. Thank you!");
+    } catch (e) {
+      sendBtn.disabled = false;
+      sendBtn.textContent = "Send report";
+      toast(errorMessage(e), "error");
+    }
+  };
+  const what = c.files.length
+    ? c.files.map((f) => h("li", {}, `${f.name} (${fmt.bytes(f.size)})`))
+    : [h("li", {}, c.exit_code != null ? `The game exited with code ${c.exit_code}; no crash folder was found.` : "No crash files found.")];
+  const close = modal(
+    `${title} crashed`,
+    h(
+      "div",
+      {},
+      h("p", { class: "muted" }, c.error ? `"${c.error}"` : "The game closed unexpectedly."),
+      h("p", {}, "Send a crash report to the studio? It helps find and fix the problem."),
+      h("p", { class: "small muted" }, "The report contains:"),
+      h(
+        "ul",
+        { class: "crash-files" },
+        ...what,
+        S.settings?.share_hardware_info ? h("li", {}, "your hardware summary (Windows, CPU, RAM, GPU)") : null,
+        h("li", {}, `${title} ${c.game_version}`),
+      ),
+      comment,
+      h("div", { class: "modal-actions" }, btn("crash-skip", "Don't send", () => close(), { cls: "ghost" }), sendBtn),
+    ),
+    {
+      onClose: () => {
+        if (!done) api.dismissCrash(c.id).catch(() => undefined);
+        nextCrash();
+      },
+    },
+  );
+}
+
+onGameCrashed(queueCrash);
 
 async function checkLauncherUpdate(manual = true) {
   try {
@@ -804,18 +1043,41 @@ async function boot() {
   if (S.me) await loadLibrary();
   else render();
   focusFirst();
+  if (S.pending.size) schedulePurchasePoll();
+  if (S.me) api.pendingCrashes().then((list) => list.forEach(queueCrash)).catch(() => undefined);
+  const link = await api.startupDeepLink().catch(() => null);
+  if (link) handleDeepLink(link);
   if (S.settings?.auto_update_launcher) checkLauncherUpdate(false);
 }
 
 // Keep ownership and update status fresh: when the window regains focus (at
-// most once a minute) and every 15 minutes in the background.
-let lastRefresh = Date.now();
+// most once a minute, or immediately while a purchase is pending) and every 15
+// minutes in the background.
 function refreshSoon(minGapMs: number) {
   if (!S.me || Date.now() - lastRefresh < minGapMs) return;
   lastRefresh = Date.now();
   void loadLibrary();
 }
-window.addEventListener("focus", () => refreshSoon(60_000));
+window.addEventListener("focus", () => refreshSoon(S.pending.size ? 0 : 60_000));
 setInterval(() => refreshSoon(0), 15 * 60_000);
 
+// zirtola://refresh[?game=<id>] (the website's "Return to the launcher" link):
+// refresh right away and select the game.
+function handleDeepLink(raw: string) {
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "zirtola:") return;
+    const game = u.searchParams.get("game");
+    if (game && /^[a-z0-9-]{1,64}$/.test(game)) {
+      S.selected = game;
+      S.view = "library";
+    }
+    void refreshNow();
+  } catch {
+    /* ignore malformed links */
+  }
+}
+onDeepLink(handleDeepLink);
+
+S.pending = loadPending();
 boot();

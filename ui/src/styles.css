@@ -126,7 +126,13 @@ h1, h2, h3 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 .pill { align-self: flex-start; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 4px 9px; border-radius: 999px; background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .14); color: #dfe5ec; }
 .pill.early_access { background: rgba(227, 163, 59, .16); border-color: rgba(227, 163, 59, .45); color: var(--gold-2); }
 .pill.in_development { background: rgba(79, 163, 199, .14); border-color: rgba(79, 163, 199, .45); color: #9fd6ec; }
-.actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+.ready-note { display: inline-flex; align-items: center; gap: 8px; color: #8fe0b0; font-weight: 600; font-size: 13.5px; }
+.ready-note .ico { display: grid; place-items: center; }
+.waiting-panel { margin-top: 14px; display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 14px; background: rgba(18, 22, 28, .82); border: 1px solid #5a4318; backdrop-filter: blur(10px); max-width: 680px; }
+.waiting-text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.waiting-text strong { color: #f6d48f; }
+.waiting-text small { color: var(--muted); line-height: 1.4; }
 
 .progress-panel { margin-top: 14px; padding: 16px 18px; border-radius: 14px; background: rgba(18, 22, 28, .82); border: 1px solid var(--line-2); backdrop-filter: blur(10px); display: grid; grid-template-columns: 1fr auto; gap: 10px 18px; max-width: 620px; }
 .progress-head { display: flex; justify-content: space-between; align-items: baseline; grid-column: 1; }
@@ -142,7 +148,16 @@ h1, h2, h3 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 .game-card { position: relative; width: 260px; height: 146px; border-radius: 14px; overflow: hidden; border: 1px solid var(--line-2); background: var(--panel); padding: 0; cursor: pointer; text-align: left; transition: transform .12s, border-color .12s; }
 .game-card:hover { transform: translateY(-2px); border-color: #4a5666; }
 .game-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 14px 30px -14px var(--accent); }
-.game-card.unowned .art { filter: saturate(.35) brightness(.7); }
+.game-card.locked .art, .game-card.pending .art { filter: saturate(.3) brightness(.62); }
+.game-card .lock, .game-card .owned-tick { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; }
+.game-card .lock { background: rgba(8, 10, 13, .72); color: #e8ecf1; border: 1px solid rgba(255, 255, 255, .18); }
+.game-card .lock svg, .game-card .owned-tick svg { width: 16px; height: 16px; }
+.game-card.pending .lock { color: var(--gold-2); animation: spin 2.4s linear infinite; }
+.game-card .owned-tick { background: rgba(79, 191, 127, .9); color: #06140c; width: 24px; height: 24px; border-radius: 99px; }
+.game-card.locked .badge { background: rgba(8, 10, 13, .7); color: #f3d79c; }
+.game-card.fresh { animation: glow 1.6s ease-in-out 3; border-color: var(--ok); }
+.game-card.fresh .badge { background: var(--ok); color: #06140c; font-weight: 700; }
+@keyframes glow { 50% { box-shadow: 0 0 0 2px var(--ok), 0 0 28px -4px var(--ok); } }
 .card-text { position: absolute; left: 0; right: 0; bottom: 0; padding: 12px 14px; display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; background: linear-gradient(transparent, rgba(8, 10, 13, .9)); }
 .card-text strong { font-size: 15px; }
 .badge { font-size: 11px; color: #cdd5de; background: rgba(0, 0, 0, .45); padding: 3px 8px; border-radius: 99px; white-space: nowrap; }
@@ -192,3 +207,9 @@ kbd { font: 700 11px system-ui; min-width: 22px; height: 22px; padding: 0 6px; d
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: #2a323d; border-radius: 10px; border: 2px solid var(--bg); }
 ::-webkit-scrollbar-track { background: transparent; }
+
+.setting small.wrap { white-space: normal; max-width: 560px; line-height: 1.45; }
+.privacy-note { color: var(--faint); font-size: 12.5px; line-height: 1.5; margin: 0; border-top: 1px solid var(--line); padding: 12px 0 16px; }
+pre.json { max-height: 360px; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; font: 12px ui-monospace, "Cascadia Mono", Consolas, monospace; user-select: text; }
+.crash-files { margin: 0 0 12px; padding-left: 20px; color: var(--muted); line-height: 1.6; font-size: 13px; }
+textarea.text.comment { width: 100%; height: auto; padding: 10px 12px; resize: vertical; font: inherit; }

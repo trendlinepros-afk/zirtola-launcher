@@ -19,6 +19,8 @@ export interface CatalogGame {
   latest_version?: string | null;
   install_size?: number | null;
   art: { accent: string; cover_url?: string | null };
+  /** Price in minor units (cents) if the website sells it; absent = not for sale / not set. */
+  price?: { amount: number; currency: string } | null;
 }
 
 export type JobKind = "install" | "update" | "verify" | "uninstall";
@@ -53,6 +55,8 @@ export interface Settings {
   library_dir: string;
   parallel_downloads: number;
   auto_update_launcher: boolean;
+  share_hardware_info: boolean;
+  offer_crash_reports: boolean;
 }
 
 export interface JobProgress {
@@ -111,7 +115,11 @@ export const api = {
   uninstall: (gameId: string) => invoke<void>("uninstall_game", { gameId }),
   pause: (gameId: string) => invoke<void>("pause_job", { gameId }),
   forget: (gameId: string) => invoke<void>("forget_install", { gameId }),
-  launch: (gameId: string) => invoke<void>("launch_game", { gameId }),
+  launch: (gameId: string, title?: string) => invoke<void>("launch_game", { gameId, title: title ?? null }),
+  hardwareReport: () => invoke<Record<string, unknown>>("hardware_report"),
+  pendingCrashes: () => invoke<CrashCandidate[]>("pending_crashes"),
+  sendCrashReport: (id: string, comment: string) => invoke<string>("send_crash_report", { id, comment }),
+  dismissCrash: (id: string) => invoke<void>("dismiss_crash", { id }),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
   openFolder: (gameId: string) => invoke<void>("open_install_folder", { gameId }),
   getSettings: () => invoke<Settings>("get_settings"),
@@ -119,6 +127,7 @@ export const api = {
   checkLauncherUpdate: () =>
     invoke<{ version: string; notes: string | null; date: string | null } | null>("check_launcher_update"),
   installLauncherUpdate: () => invoke<void>("install_launcher_update"),
+  startupDeepLink: () => invoke<string | null>("startup_deep_link"),
 };
 
 export function onJobProgress(cb: (p: JobProgress) => void): Promise<UnlistenFn> {
@@ -127,6 +136,26 @@ export function onJobProgress(cb: (p: JobProgress) => void): Promise<UnlistenFn>
 
 export function onJobFinished(cb: (p: JobFinished) => void): Promise<UnlistenFn> {
   return listen<JobFinished>("job-finished", (e) => cb(e.payload));
+}
+
+export interface CrashCandidate {
+  id: string;
+  game_id: string;
+  game_title: string;
+  game_version: string;
+  build_id: string;
+  exit_code: number | null;
+  error: string;
+  files: { name: string; size: number }[];
+  detected_at: string;
+}
+
+export function onGameCrashed(cb: (c: CrashCandidate) => void): Promise<UnlistenFn> {
+  return listen<CrashCandidate>("game-crashed", (e) => cb(e.payload));
+}
+
+export function onDeepLink(cb: (url: string) => void): Promise<UnlistenFn> {
+  return listen<string>("deep-link", (e) => cb(e.payload));
 }
 
 export function onLauncherUpdateProgress(cb: (p: { downloaded: number; total: number | null }) => void) {

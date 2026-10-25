@@ -15,8 +15,59 @@ use zirtola_core::TrustedKeys;
 /// Production launch keys would be pinned here (JWKS JSON). Empty until the website exists.
 const PINNED_LAUNCH_KEYS: &str = r#"{ "keys": [] }"#;
 
+/// Test helper: with ZIRTOLA_TEST_CRASH=1 the stand-in game writes an
+/// Unreal-style crash folder and exits with an error code, so the launcher's
+/// crash reporting can be tried without a real crash.
+fn fake_crash() -> ! {
+    let exe = std::env::current_exe().ok();
+    let project = exe
+        .as_ref()
+        .and_then(|p| p.file_stem())
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "Game".into());
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let guid = format!(
+        "{:032X}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0) as u128
+    );
+    let dir = base
+        .join(&project)
+        .join("Saved")
+        .join("Crashes")
+        .join(format!("UECC-Windows-{guid}_0000"));
+    let _ = std::fs::create_dir_all(&dir);
+    let error =
+        "Unhandled Exception: EXCEPTION_ACCESS_VIOLATION reading address 0x0000000000000010";
+    let stack = format!(
+        "{project}!UExcavatorArm::TickHydraulics() [D:\\Build\\Source\\Machines\\ExcavatorArm.cpp:212]\n\
+{project}!UHydraulicCylinder::ApplyForce() [D:\\Build\\Source\\Machines\\HydraulicCylinder.cpp:88]\n\
+{project}!FPhysScene_Chaos::OnPhysicsStep()\n{project}!FEngineLoop::Tick()\nkernel32\nntdll"
+    );
+    let xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<FGenericCrashContext>\n<RuntimeProperties>\n\
+<CrashGUID>UECC-Windows-{guid}_0000</CrashGUID>\n<GameName>UE-{project}</GameName>\n\
+<BuildVersion>{}</BuildVersion>\n<ErrorMessage>{error}</ErrorMessage>\n<CallStack>{stack}</CallStack>\n\
+</RuntimeProperties>\n</FGenericCrashContext>\n",
+        std::env::var("ZIRTOLA_GAME_VERSION").unwrap_or_default()
+    );
+    let _ = std::fs::write(dir.join("CrashContext.runtime-xml"), xml);
+    let _ = std::fs::write(
+        dir.join(format!("{project}.log")),
+        format!("[2026.10.25-12.00.00:000][  0]LogInit: Build: test\n[2026.10.25-12.00.05:000][310]LogWindows: Error: === Critical error: ===\n[2026.10.25-12.00.05:000][310]LogWindows: Error: {error}\n"),
+    );
+    // A small stand-in for the minidump (real ones are a few MB).
+    let _ = std::fs::write(dir.join("UEMinidump.dmp"), vec![0x4d_u8; 256 * 1024]);
+    eprintln!("wrote fake crash folder {}", dir.display());
+    std::process::exit(3);
+}
+
 #[tokio::main]
 async fn main() {
+    if std::env::var_os("ZIRTOLA_TEST_CRASH").is_some() {
+        fake_crash();
+    }
     let game_id = std::env::var("ZIRTOLA_GAME_ID").unwrap_or_else(|_| "unknown".into());
     let version = std::env::var("ZIRTOLA_GAME_VERSION").unwrap_or_default();
     println!("==============================================");

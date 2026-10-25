@@ -56,6 +56,9 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": { "schemes": ["zirtola"] }
+    },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENEQzFFMjBCM0NDNjVDOTYKUldTV1hNWThDK0xCelFMNzNJeVlKQTE3RzBLa2pTZGphdkdBbzZ6Rm5ia3E1TGYwQ3NaYnpCL2QK",
       "endpoints": [

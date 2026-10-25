@@ -8,6 +8,7 @@
       "status": "early_access",
       "platforms": ["win64"],
       "art": { "accent": "#e3a33b" },
+      "price": { "amount": 2499, "currency": "usd" },
       "exe": "DirtDigger.exe",
       "folder": "DirtDigger"
     },
@@ -19,6 +20,7 @@
       "status": "in_development",
       "platforms": ["win64"],
       "art": { "accent": "#4fa3c7" },
+      "price": { "amount": 1999, "currency": "usd" },
       "exe": "AlaskanBushSimulator.exe",
       "folder": "AlaskanBushSimulator"
     }

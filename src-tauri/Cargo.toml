@@ -18,6 +18,7 @@ zirtola-core = { path = "../crates/zirtola-core" }
 tauri = { version = "2", features = [] }
 tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = "2"
 anyhow.workspace = true
 serde.workspace = true
@@ -33,3 +34,8 @@ chrono.workspace = true
 futures.workspace = true
 keyring = { version = "3", features = ["windows-native"] }
 open = "5"
+zip = { version = "4", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_SystemInformation"] }

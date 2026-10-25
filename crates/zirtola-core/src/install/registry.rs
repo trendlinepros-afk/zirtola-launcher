@@ -1,4 +1,4 @@
-//! The launcher's list of installed games (`%APPDATA%\Zirtola\installs.json`).
+//! The launcher's list of installed games (`%APPDATA%\com.zirtola.launcher\installs.json`).
 //! The install folder itself is the source of truth for what is on disk; the
 //! registry only remembers where each game lives.
 

@@ -25,6 +25,12 @@ export interface CatalogGame {
   sales_open?: boolean | null;
   /** Website checkout page for this game, when it sells it directly. */
   checkout_url?: string | null;
+  /** Still in early access: show "Report a bug". */
+  early_access?: boolean | null;
+  /** The game's bug-report forum on the website. */
+  bug_report_url?: string | null;
+  /** The website's system requirements section, with a one-line minimum. */
+  requirements?: { url: string; minimum_target?: string | null; minimum_summary?: string | null } | null;
 }
 
 export type JobKind = "install" | "update" | "verify" | "uninstall";

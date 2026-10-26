@@ -24,7 +24,14 @@
         "Rivers and creeks that flow, flood your pit and carry silt",
         "A 5-mile claim of boreal valley, built from real placer geology",
         "Gamepad first, keyboard supported"
-      ]
+      ],
+      "early_access": true,
+      "bug_report_url": "http://localhost:3000/community/bugs?game=dirt-simulator",
+      "requirements": {
+        "url": "http://localhost:3000/games/dirt-simulator#system-requirements",
+        "minimum_target": "1080p · Low · 30 fps",
+        "minimum_summary": "Ryzen 5 3600 / Core i5-10400 · 16 GB RAM · RTX 2060 / RX 6600 · SSD"
+      }
     },
     {
       "id": "alaskan-bush-simulator",

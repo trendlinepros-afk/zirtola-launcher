@@ -91,6 +91,24 @@ pub struct CatalogGame {
     /// Store-page bullet points.
     #[serde(default)]
     pub features: Vec<String>,
+    /// Still in early access: the game page offers "Report a bug".
+    #[serde(default)]
+    pub early_access: Option<bool>,
+    /// The game's bug-report forum on the website.
+    #[serde(default)]
+    pub bug_report_url: Option<String>,
+    /// Link to the website's system requirements, with a one-line minimum.
+    #[serde(default)]
+    pub requirements: Option<Requirements>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Requirements {
+    pub url: String,
+    #[serde(default)]
+    pub minimum_target: Option<String>,
+    #[serde(default)]
+    pub minimum_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -50,6 +50,20 @@ publisher". Signing shows your name and builds trust with Windows over time.
 Turning signing on is then **one setting** (step 4 below adds them to GitHub):
 `ZIRTOLA_SIGN_MODE = azure`. Until then releases still build, just unsigned.
 
+Players see the "Windows protected your PC" notice until Windows trusts the
+launcher. The website explains it with pictures ("What to expect when you
+install", at zirtola.com/help/installing-on-windows, on the checkout page,
+after payment and in the receipt). After your first signed release:
+
+- Set `LAUNCHER_PUBLISHER_NAME` on Railway to the name on your certificate
+  (for example `Zirtola`). The guide then shows that name instead of
+  "Unknown publisher". Run `npm run guide:images -- --publisher "Zirtola"` in
+  the website repo and commit, so the pictures in the receipt email match.
+- SmartScreen still needs a few weeks of downloads to trust a new certificate.
+  When players stop seeing the notice, set `SHOW_SMARTSCREEN_NOTICE=false`:
+  the checkout panel goes away and the success page and receipt show a short
+  install note. The help page stays.
+
 ### 2. Stripe (payments)
 
 1. Go to <https://dashboard.stripe.com/register> and create the account (you, not me).
@@ -129,6 +143,9 @@ update before you can ship game builds.
 | `LAUNCHER_DOWNLOAD_URL` | `https://github.com/trendlinepros-afk/zirtola-launcher/releases/latest` |
 | `LAUNCHER_OFFLINE_GRACE_DAYS` | `7` (how long a game runs offline) |
 | `LAUNCHER_DEACTIVATIONS_PER_PERIOD` / `LAUNCHER_DEACTIVATION_PERIOD_DAYS` | `3` / `30` |
+| `SUPPORT_EMAIL` | the address players write to if the installer looks different from the pictures (until set, the guide says "reply to any email from us") |
+| `LAUNCHER_PUBLISHER_NAME` | leave empty until releases are signed (see step 1) |
+| `SHOW_SMARTSCREEN_NOTICE` | leave unset (on); `false` retires the notice later |
 | `LICENSE_KEY_SECRET` | optional: a long random string (lets owners view their licence key again; set once, never change). Left empty it is derived from `AUTH_SECRET`. |
 | `STRIPE_SECRET_KEY` | Stripe step 5 (`sk_live_...`; test with `sk_test_...` first) |
 | `STRIPE_WEBHOOK_SECRET` | Stripe step 6 (`whsec_...`) |
@@ -140,6 +157,22 @@ Never set `STRIPE_API_BASE` on Railway: it is only for local tests.
    `https://zirtola.com/api/launcher/v1/config`: it should show JSON.
 
 ### 6. The store page and price
+
+Some of the game page lives in the website's code, not in Studio, so it goes
+live with a deploy and needs no database change. It is in
+`src/content/game-specs.ts` (one entry per game slug):
+
+- **System requirements** (Minimum and Recommended). A game without an entry
+  shows no requirements section.
+- **earlyAccess**: `true` shows the "Still in development" notice (game page,
+  checkout, success page, receipt) and the launcher's "Report a bug" link.
+  Set it to `false` when the game leaves early access.
+- **bugForum**: the forum category for bug reports (Dirt Digger: `bugs`,
+  filtered to the game).
+
+Wording for buying, devices and early access is in
+`src/lib/launcher/sales-copy.ts`; the install guide's wording is in
+`src/lib/launcher/install-guide.ts`.
 
 1. Sign in to zirtola.com as admin → **Studio → Games → Dirt Digger**: check the
    title (Dirt Digger), tagline, description, feature list, screenshots and cover.

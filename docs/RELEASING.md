@@ -69,15 +69,21 @@ launch public key into each game, see GAME_INTEGRATION.md). On the website:
    - `Zirtola Launcher_0.2.0_x64-setup.exe` (link this from the website)
    - `…-setup.exe.sig` (updater signature)
    - `latest.json` (the update feed)
+   - `installer.json` and `SHA256SUMS.txt`: the setup file's published name,
+     URL and SHA-256 (made by `scripts/installer-info.mjs`). The website reads
+     `installer.json` from the latest release to show the checksum next to its
+     download button and to send that button straight to the file.
 4. Download the installer from the draft, install it on a clean Windows
    machine or VM, sign in, install a game.
 5. Click **Publish release**. Installed launchers check
    `https://github.com/trendlinepros-afk/zirtola-launcher/releases/latest/download/latest.json`
    at start-up and offer the update (Settings → "Check for updates" checks on demand).
 
-The website's download button can always point at
-`https://github.com/trendlinepros-afk/zirtola-launcher/releases/latest` (or the
-setup `.exe` asset of the latest release).
+The website's download buttons all go to `zirtola.com/download/launcher`, which
+redirects to the installer named in the latest release's `installer.json`
+(falling back to `LAUNCHER_DOWNLOAD_URL`). GitHub turns spaces in asset names
+into dots, so players download `Zirtola.Launcher_<version>_x64-setup.exe`;
+the release job checks that the uploaded asset has exactly that name.
 
 A broken release can be pulled by deleting or re-drafting it: `latest.json`
 then resolves to the previous published release.

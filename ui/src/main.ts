@@ -314,6 +314,7 @@ function hero(lg: LibraryGame) {
       h("p", { class: "tagline" }, g.tagline),
       h("p", { class: "desc" }, g.description),
       meta.length ? h("p", { class: "meta" }, meta.join("  ·  ")) : null,
+      requirementsLine(g),
       lg.job || p ? progressPanel(lg, p) : actions(lg),
     ),
   );
@@ -375,6 +376,37 @@ function updateProgressDom(p: JobProgress) {
   if (want) label.textContent = want;
   else if (p.phase === "downloading") label.textContent = p.kind === "update" ? "Updating" : p.kind === "verify" ? "Repairing" : "Downloading";
   return true;
+}
+
+// The website's FAQ about moving a licence between PCs.
+function devicesFaqUrl(): string | null {
+  try {
+    return S.info ? `${new URL(S.info.api_base).origin}/terms#faq-devices` : null;
+  } catch {
+    return null;
+  }
+}
+
+// Small links under the game info: "System requirements" (the website's
+// section, with the minimum inline) and, while in early access, "Report a bug"
+// (the game's bug forum). Crash reports stay in their own prompt.
+function requirementsLine(g: CatalogGame) {
+  const r = g.requirements;
+  const bug = g.early_access && g.bug_report_url ? g.bug_report_url : null;
+  if (!r?.url && !bug) return null;
+  const link = (id: string, label: string, url: string, what: string, icon?: string) =>
+    h("a", { href: "#", "data-id": id, onclick: (e: Event) => { e.preventDefault(); void openSite(url, what); } }, ...(icon ? [h("span", { class: "ico", html: icon })] : []), label);
+  return h(
+    "div",
+    { class: "reqs" },
+    h(
+      "p",
+      { class: "reqs-links" },
+      r?.url ? link("requirements", "System requirements", r.url, "system requirements") : null,
+      bug ? link("report-bug", "Report a bug", bug, "bug forum", icons.bug) : null,
+    ),
+    r?.minimum_summary ? h("p", { class: "reqs-min" }, `Minimum: ${r.minimum_summary}${r.minimum_target ? ` (${r.minimum_target})` : ""}`) : null,
+  );
 }
 
 function buyLabel(g: CatalogGame): string {
@@ -651,7 +683,12 @@ function deviceConflictDialog(g: CatalogGame, e: CmdError) {
     ),
   );
   const confirmBox = h("input", { type: "checkbox", "data-id": "confirm-deactivate" }) as HTMLInputElement;
-  const note = h("p", { class: "muted small" }, "Your licence plays on one PC at a time. The other PC stops working until you move the licence back. You can also do this from your account page on the website.");
+  const note = h(
+    "p",
+    { class: "muted small" },
+    "Your licence moves with you: it plays on one PC at a time, and you can switch whenever you like. Deactivating is free and the other PC simply stops until you move it back. You can also do this from your account page on the website. ",
+    h("a", { href: "#", "data-id": "devices-learn-more", onclick: (e: Event) => { e.preventDefault(); void openSite(devicesFaqUrl(), "help page"); } }, "Learn more"),
+  );
   const close = modal(
     `${g.title} is active on another PC`,
     h(
@@ -737,6 +774,14 @@ async function licenseDialog(lg: LibraryGame) {
     );
   }
   if (!here && !other) act.append(h("p", { class: "muted" }, "Not active on any PC yet. Playing activates this PC."));
+  act.append(
+    h(
+      "p",
+      { class: "muted small" },
+      "Plays on one PC at a time; switch whenever you like. ",
+      h("a", { href: "#", onclick: (e: Event) => { e.preventDefault(); void openSite(devicesFaqUrl(), "help page"); } }, "Learn more"),
+    ),
+  );
   const accountUrl = (() => {
     try {
       return S.info ? `${new URL(S.info.api_base).origin}/settings/games` : null;

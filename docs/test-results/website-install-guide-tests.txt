@@ -1,0 +1,21 @@
+
+> zirtola@0.1.0 test:guide
+> node --conditions=react-server --import tsx --test tests/install-guide.test.ts
+
+✔ the guide never tells players to switch off their protection (0.9097ms)
+✔ the guide is honest about reputation taking time (0.2054ms)
+✔ the guide covers the checksum and a support contact (0.209ms)
+✔ SHOW_SMARTSCREEN_NOTICE switches the notice off with one setting (0.2807ms)
+✔ every illustration is labelled and shows the right details (0.5699ms)
+✔ installer.json is validated before the site trusts it (0.2266ms)
+✔ system requirements live in the repo, per game (0.4621ms)
+✔ early access is a per-game setting (0.1171ms)
+✔ device wording leads with freedom and avoids the banned words (0.1784ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 144.4863

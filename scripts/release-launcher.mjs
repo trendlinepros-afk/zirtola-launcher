@@ -108,6 +108,9 @@ if (flag("local-build")) {
     platforms: { "windows-x86_64": { signature: readFileSync(join(dir, `${setup}.sig`), "utf8").trim(), url: process.env.UPDATE_BASE_URL ? `${process.env.UPDATE_BASE_URL.replace(/\/$/, "")}/${encodeURIComponent(setup)}` : setup } },
   };
   writeFileSync(join(dir, "latest.json"), JSON.stringify(feed, null, 2));
+  // installer.json + SHA256SUMS.txt for the website's download page.
+  const info = spawnSync("node", ["scripts/installer-info.mjs", "--dir", dir, "--version", version, ...(process.env.UPDATE_BASE_URL ? ["--base-url", process.env.UPDATE_BASE_URL] : [])], { cwd: ROOT, stdio: "inherit" });
+  if (info.status !== 0) fail("installer-info failed");
   log(`built ${join(dir, setup)} and latest.json`);
 }
 

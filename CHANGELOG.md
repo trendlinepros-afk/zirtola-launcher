@@ -11,6 +11,14 @@
 - **View license key** button for owned games: masked key with Show and Copy, where
   the licence came from, and which PC it is active on. Fetched live, never stored.
 - Games not on sale yet show a disabled **Buy · price** button with "Coming soon".
+- Game page: **System requirements** link (opens the website's section) with the
+  minimum spec inline, and **Report a bug** (the game's forum) while a game is in
+  early access. Both come from the catalogue (`requirements`, `early_access`,
+  `bug_report_url`).
+- Device dialogs say plainly that a licence moves between your PCs, with a
+  **Learn more** link to the website's FAQ.
+- Releases publish `installer.json` and `SHA256SUMS.txt` (the setup file's
+  SHA-256) for the website's download page.
 - The Store button never fails silently: it falls back to the site's games page and
   shows a message when the browser can't be opened.
 - Production manifest and launch keys (2026-10) pinned; the repository is now

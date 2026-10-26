@@ -94,6 +94,18 @@ jobs:
           updaterJsonPreferNsis: true
           args: --config {"bundle":{"createUpdaterArtifacts":true}}
 
+      - name: Publish the installer checksum (installer.json, SHA256SUMS.txt)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          node scripts/installer-info.mjs --dir target/release/bundle/nsis --version "$version" --repo "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME"
+          file=$(node -p "require('./target/release/bundle/nsis/installer.json').file")
+          # The website links to this exact asset name: fail if GitHub named it differently.
+          gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name' | grep -Fx "$file"
+          gh release upload "$GITHUB_REF_NAME" target/release/bundle/nsis/installer.json target/release/bundle/nsis/SHA256SUMS.txt --clobber
+
       - name: Verify the Authenticode signature
         if: env.ZIRTOLA_SIGN_MODE != '' && env.ZIRTOLA_SIGN_MODE != 'none'
         shell: pwsh

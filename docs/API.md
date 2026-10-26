@@ -78,7 +78,7 @@ Games the launcher lists (published and visible in the launcher).
 { "games": [ {
   "id": "dirt-simulator",
   "title": "Dirt Digger",
-  "tagline": "Heavy machines, soft ground.",
+  "tagline": "Real dirt. Real gold.",
   "description": "…",
   "status": "early_access",            // released | early_access | in_development | on_hold | coming_soon
   "store_url": "https://zirtola.com/games/dirt-simulator",
@@ -86,9 +86,22 @@ Games the launcher lists (published and visible in the launcher).
   "latest_version": "1.0.1",           // live build on win64/live, or null
   "install_size": 389210112,           // bytes, or null
   "art": { "accent": "#FFCD00", "cover_url": "https://…/key-art.jpg" },
-  "price": { "amount": 2499, "currency": "usd" }   // optional, minor units; shown on "Buy on the website"
+  "price": { "amount": 1999, "currency": "usd" },  // optional, minor units; shown on "Buy on the website"
+  "sales_open": false,                 // false: disabled "Buy" with "Coming soon"
+  "checkout_url": "https://zirtola.com/checkout/dirt-simulator",
+  "features": ["…"],
+  "early_access": true,                // shows "Report a bug" on the game page
+  "bug_report_url": "https://zirtola.com/community/bugs?game=dirt-simulator",
+  "requirements": {                    // optional: "System requirements" link + minimum line
+    "url": "https://zirtola.com/games/dirt-simulator#system-requirements",
+    "minimum_target": "1080p · Low · 30 fps",
+    "minimum_summary": "Ryzen 5 3600 / Core i5-10400 · 16 GB RAM · RTX 2060 / RX 6600 · SSD"
+  }
 } ] }
 ```
+
+`early_access`, `bug_report_url` and `requirements` come from the website's
+`src/content/game-specs.ts` (per game, in the repo, not the database).
 
 **Buying from the launcher.** A locked game's button reads "Buy on the website · $24.99"
 (price when provided) and opens `store_url`. The launcher remembers the game as a

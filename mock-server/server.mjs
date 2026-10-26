@@ -336,6 +336,9 @@ function catalog() {
         sales_open: true,
         checkout_url: `${BASE}/store/${g.id}`,
         features: g.features ?? [],
+        early_access: g.early_access ?? false,
+        bug_report_url: g.bug_report_url ?? null,
+        requirements: g.requirements ?? null,
       };
     }),
   };

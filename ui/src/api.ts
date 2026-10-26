@@ -21,6 +21,10 @@ export interface CatalogGame {
   art: { accent: string; cover_url?: string | null };
   /** Price in minor units (cents) if the website sells it; absent = not for sale / not set. */
   price?: { amount: number; currency: string } | null;
+  /** false = shown with a price but not on sale yet ("Coming soon"). */
+  sales_open?: boolean | null;
+  /** Website checkout page for this game, when it sells it directly. */
+  checkout_url?: string | null;
 }
 
 export type JobKind = "install" | "update" | "verify" | "uninstall";
@@ -34,7 +38,37 @@ export interface InstallInfo {
   folder_missing: boolean;
 }
 
+export interface ChangelogEntry {
+  version: string;
+  channel: string;
+  released_at: string;
+  notes: string;
+  current: boolean;
+}
+
+export interface ActiveDevice {
+  id: string;
+  name: string;
+  activated_at: string;
+  last_seen_at: string;
+}
+
+export interface LicenseInfo {
+  game_id: string;
+  game_title: string;
+  source: "purchase" | "key" | "grant" | "early_access";
+  granted_at: string;
+  order_number: string | null;
+  key: string | null;
+  key_masked: string | null;
+  activations: { id: string; name: string; activated_at: string; last_seen_at: string; this_device: boolean }[];
+}
+
 export interface LibraryGame {
+  /** Channels the licence allows: "live" (stable) and maybe "beta". */
+  branches: string[];
+  /** Channel this install follows. */
+  branch: string;
   game: CatalogGame;
   owned: boolean;
   entitlement: string | null;
@@ -84,6 +118,7 @@ export interface JobFinished {
 export interface CmdError {
   code: string;
   message: string;
+  details?: { active_devices?: ActiveDevice[]; [k: string]: unknown };
 }
 
 export function errorMessage(e: unknown): string {
@@ -116,6 +151,10 @@ export const api = {
   pause: (gameId: string) => invoke<void>("pause_job", { gameId }),
   forget: (gameId: string) => invoke<void>("forget_install", { gameId }),
   launch: (gameId: string, title?: string) => invoke<void>("launch_game", { gameId, title: title ?? null }),
+  deactivateDevice: (activationId: string) => invoke<void>("deactivate_device", { activationId }),
+  changelog: (gameId: string) => invoke<{ game_id: string; entries: ChangelogEntry[] }>("game_changelog", { gameId }),
+  setBranch: (gameId: string, branch: "live" | "beta") => invoke<void>("set_branch", { gameId, branch }),
+  license: (gameId: string) => invoke<LicenseInfo>("game_license", { gameId }),
   hardwareReport: () => invoke<Record<string, unknown>>("hardware_report"),
   pendingCrashes: () => invoke<CrashCandidate[]>("pending_crashes"),
   sendCrashReport: (id: string, comment: string) => invoke<string>("send_crash_report", { id, comment }),

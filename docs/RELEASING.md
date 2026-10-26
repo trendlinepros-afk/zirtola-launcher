@@ -72,11 +72,11 @@ launch public key into each game, see GAME_INTEGRATION.md). On the website:
 4. Download the installer from the draft, install it on a clean Windows
    machine or VM, sign in, install a game.
 5. Click **Publish release**. Installed launchers check
-   `https://github.com/trendlinepros-afk/zitrola-launcher/releases/latest/download/latest.json`
+   `https://github.com/trendlinepros-afk/zirtola-launcher/releases/latest/download/latest.json`
    at start-up and offer the update (Settings → "Check for updates" checks on demand).
 
 The website's download button can always point at
-`https://github.com/trendlinepros-afk/zitrola-launcher/releases/latest` (or the
+`https://github.com/trendlinepros-afk/zirtola-launcher/releases/latest` (or the
 setup `.exe` asset of the latest release).
 
 A broken release can be pulled by deleting or re-drafting it: `latest.json`

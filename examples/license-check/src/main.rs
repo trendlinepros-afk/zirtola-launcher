@@ -9,7 +9,7 @@
 //! 3. Check `aud`/`game` and `exp`. If anything fails, show "Please start the
 //!    game from the Zirtola Launcher" (or fall back to an offline grace period).
 
-use zirtola_core::token::verify_launch_token;
+use zirtola_core::token::{verify_license, LicenseState};
 use zirtola_core::TrustedKeys;
 
 /// Production launch keys would be pinned here (JWKS JSON). Empty until the website exists.
@@ -99,23 +99,79 @@ async fn main() {
     let _ = std::io::stdin().read_line(&mut s);
 }
 
+/// Where the last good licence token is kept for offline play.
+fn cache_path(game_id: &str) -> std::path::PathBuf {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("Zirtola").join("licences").join(format!("{game_id}.jwt"))
+}
+
+/// The licence check a game runs:
+/// 1. Started by the launcher: verify the fresh token offline (signature, game,
+///    expiry, clock skew) and keep it for offline play.
+/// 2. Started without the launcher (or offline later): use the kept token while
+///    its offline grace period (set by the website, 7 days by default) lasts.
+/// 3. When online, also ask the website whether the licence is still owned and
+///    this PC still activated; a deactivated PC stops at its next check.
 async fn check(game_id: &str) -> anyhow::Result<String> {
-    let token = std::env::var("ZIRTOLA_SESSION_TOKEN")
-        .map_err(|_| anyhow::anyhow!("no session token (not started by the launcher)"))?;
     let mut keys = TrustedKeys::from_json(PINNED_LAUNCH_KEYS)?;
-    if let Ok(base) = std::env::var("ZIRTOLA_API_BASE") {
-        let api = zirtola_core::api::ApiClient::new(&base)?;
+    let api = match std::env::var("ZIRTOLA_API_BASE") {
+        Ok(base) => Some(zirtola_core::api::ApiClient::new(&base)?),
+        Err(_) => None,
+    };
+    if let Some(api) = &api {
         if api.is_loopback() {
             keys.add_set(&api.keys().await?)?;
         }
     }
+    let cache = cache_path(game_id);
+    let token = match std::env::var("ZIRTOLA_SESSION_TOKEN") {
+        Ok(t) => t,
+        Err(_) => std::fs::read_to_string(&cache)
+            .map_err(|_| anyhow::anyhow!("no licence on this PC (start the game from the launcher once)"))?,
+    };
     let now = chrono::Utc::now().timestamp();
-    let c = verify_launch_token(&token, &keys, game_id, now, 120)?;
-    Ok(format!(
-        "account {} ({}), entitlement '{}', token valid for {} more seconds",
-        c.sub,
-        c.name.unwrap_or_default(),
-        c.ent,
-        c.exp - now
-    ))
+    let (c, state) = verify_license(&token, &keys, game_id, now, 120, 7 * 86_400)?;
+
+    // Online re-check (best effort: offline play continues within the grace period).
+    if let Some(api) = &api {
+        let url = format!("{}/v1/launch-tokens/verify", api.base());
+        if let Ok(resp) = api
+            .http()
+            .post(url)
+            .json(&serde_json::json!({ "token": token }))
+            .send()
+            .await
+        {
+            if let Ok(v) = resp.json::<serde_json::Value>().await {
+                if v.get("valid") == Some(&serde_json::Value::Bool(false)) {
+                    let _ = std::fs::remove_file(&cache);
+                    let reason = v.get("reason").and_then(|r| r.as_str()).unwrap_or("licence not valid");
+                    anyhow::bail!("the website says: {reason}");
+                }
+            }
+        }
+    }
+    if state == LicenseState::Fresh {
+        if let Some(dir) = cache.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&cache, &token);
+    }
+    Ok(match state {
+        LicenseState::Fresh => format!(
+            "account {} ({}), entitlement '{}', fresh token (valid {} more seconds, offline grace {} days)",
+            c.sub,
+            c.name.unwrap_or_default(),
+            c.ent,
+            c.exp - now,
+            c.grace.unwrap_or(7 * 86_400) / 86_400
+        ),
+        LicenseState::Grace { remaining_s } => format!(
+            "account {}, playing offline on the last licence check ({:.1} days of grace left)",
+            c.sub,
+            remaining_s as f64 / 86_400.0
+        ),
+    })
 }

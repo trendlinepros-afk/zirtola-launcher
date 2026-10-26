@@ -4,8 +4,6 @@ The Windows desktop launcher for Zirtola games. Players install it from the
 studio's website, sign in with their Zirtola account (the same account as on
 the website), and download, update, verify and play the games they own.
 
-> The repository is named `zitrola-launcher`; the product is **Zirtola**.
-
 | Sign in | Downloading | Patching (only changed chunks) |
 | --- | --- | --- |
 | ![Sign in](docs/screenshots/sign-in.png) | ![Downloading](docs/screenshots/downloading.png) | ![Patching](docs/screenshots/patching.png) |

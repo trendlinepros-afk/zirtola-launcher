@@ -20,7 +20,7 @@ if (!version || !installerPath) {
 const root = join(fileURLToPath(import.meta.url), "..", "..");
 const sha = createHash("sha256").update(readFileSync(installerPath)).digest("hex").toUpperCase();
 const asset = encodeURIComponent(basename(installerPath));
-const url = `https://github.com/trendlinepros-afk/zitrola-launcher/releases/download/v${version}/${asset}`;
+const url = `https://github.com/trendlinepros-afk/zirtola-launcher/releases/download/v${version}/${asset}`;
 const id = "Zirtola.ZirtolaLauncher";
 const outDir = join(root, "packaging", "winget", "out", version);
 mkdirSync(outDir, { recursive: true });
@@ -68,7 +68,7 @@ Publisher: Zirtola
 PublisherUrl: https://zirtola.com
 PrivacyUrl: https://zirtola.com/privacy
 PackageName: Zirtola Launcher
-PackageUrl: https://github.com/trendlinepros-afk/zitrola-launcher
+PackageUrl: https://github.com/trendlinepros-afk/zirtola-launcher
 License: Proprietary
 ShortDescription: Download, update and play games from the Zirtola studio.
 Description: The Zirtola Launcher installs, updates and launches games from the Zirtola studio for your Zirtola account.
@@ -76,7 +76,7 @@ Moniker: zirtola
 Tags:
   - games
   - launcher
-ReleaseNotesUrl: https://github.com/trendlinepros-afk/zitrola-launcher/releases/tag/v${version}
+ReleaseNotesUrl: https://github.com/trendlinepros-afk/zirtola-launcher/releases/tag/v${version}
 ManifestType: defaultLocale
 ManifestVersion: 1.9.0
 `,

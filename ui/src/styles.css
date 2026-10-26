@@ -121,7 +121,7 @@ h1, h2, h3 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 .hero-body { position: relative; padding: 40px 44px 30px; max-width: 720px; display: flex; flex-direction: column; gap: 10px; }
 .hero h1 { font-size: 46px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.05; }
 .tagline { margin: 0; font-size: 17px; color: #dfe5ec; }
-.desc { margin: 0; color: #b3bdc8; line-height: 1.55; max-width: 620px; white-space: pre-line; max-height: 7.8em; overflow: hidden; }
+.desc { margin: 0; color: #b3bdc8; line-height: 1.55; max-width: 620px; white-space: pre-line; max-height: 10.9em; overflow: hidden; }
 .meta { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
 .pill { align-self: flex-start; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 4px 9px; border-radius: 999px; background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .14); color: #dfe5ec; }
 .pill.early_access { background: rgba(227, 163, 59, .16); border-color: rgba(227, 163, 59, .45); color: var(--gold-2); }
@@ -213,3 +213,36 @@ kbd { font: 700 11px system-ui; min-width: 22px; height: 22px; padding: 0 6px; d
 pre.json { max-height: 360px; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; font: 12px ui-monospace, "Cascadia Mono", Consolas, monospace; user-select: text; }
 .crash-files { margin: 0 0 12px; padding-left: 20px; color: var(--muted); line-height: 1.6; font-size: 13px; }
 textarea.text.comment { width: 100%; height: auto; padding: 10px 12px; resize: vertical; font: inherit; }
+
+/* ---------------------------------------------------------------- devices & changelog */
+.device-list { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 12px; }
+.device-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 14px; border-radius: 10px; background: var(--bg-2); border: 1px solid var(--line); }
+.device-row > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.device-row small { color: var(--muted); }
+.confirm-row { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; color: var(--text); margin: 4px 0 8px; }
+.confirm-row input { margin-top: 2px; accent-color: var(--gold); }
+.changelog { max-height: 60vh; overflow: auto; padding-right: 6px; }
+.cl-entry { padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); margin-bottom: 10px; background: var(--bg-2); }
+.cl-entry.installed { border-color: var(--gold); box-shadow: inset 3px 0 0 var(--gold); }
+.cl-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.cl-head small { margin-left: auto; color: var(--faint); }
+.pill.beta { background: rgba(155, 120, 230, .16); border-color: rgba(155, 120, 230, .5); color: #cbb8ff; }
+.pill.installed { background: rgba(227, 163, 59, .16); border-color: rgba(227, 163, 59, .45); color: var(--gold-2); }
+.notes h4 { margin: 8px 0 4px; font-size: 14px; }
+.notes p, .notes li { color: #c9d1da; line-height: 1.5; margin: 4px 0; }
+.notes ul { margin: 4px 0; padding-left: 18px; }
+.notes code { background: #0d1014; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+.btn.beta-on { border-color: rgba(155, 120, 230, .7); color: #d9ccff; }
+.soon-badge { align-self: center; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #cdd5de; background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .16); padding: 6px 10px; border-radius: 99px; }
+
+/* ---------------------------------------------------------------- license key */
+.license-key-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.license-key { font: 600 17px ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: .12em; background: var(--bg); border: 1px solid var(--line-2); border-radius: 10px; padding: 10px 14px; user-select: text; }
+.license-none { padding: 12px 14px; border-radius: 10px; background: var(--bg-2); border: 1px solid var(--line); }
+.license-details { display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; margin: 16px 0 6px; font-size: 13.5px; }
+.license-details dt { color: var(--muted); }
+.license-details dd { margin: 0; }
+.license h4 { margin: 14px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.license-activation { display: flex; flex-direction: column; gap: 8px; }
+.license-activation p { margin: 0; }
+.license-safety { margin-top: 14px !important; }

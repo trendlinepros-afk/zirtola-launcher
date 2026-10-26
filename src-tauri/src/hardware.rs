@@ -229,3 +229,82 @@ pub fn collect(
         launcher_version: launcher_version.to_string(),
     }
 }
+
+/// SMBIOS system UUID (type 1 table), read with GetSystemFirmwareTable.
+fn smbios_uuid() -> Option<[u8; 16]> {
+    use windows::Win32::System::SystemInformation::{GetSystemFirmwareTable, FIRMWARE_TABLE_PROVIDER};
+    let rsmb = FIRMWARE_TABLE_PROVIDER(u32::from_be_bytes(*b"RSMB"));
+    let size = unsafe { GetSystemFirmwareTable(rsmb, 0, None) };
+    if size == 0 {
+        return None;
+    }
+    let mut buf = vec![0u8; size as usize];
+    let got = unsafe { GetSystemFirmwareTable(rsmb, 0, Some(&mut buf)) };
+    if got == 0 || got as usize > buf.len() || buf.len() < 8 {
+        return None;
+    }
+    // RawSMBIOSData header: 4 bytes of versions, u32 length, then the tables.
+    let len = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
+    let data = &buf[8..(8 + len).min(buf.len())];
+    let mut i = 0usize;
+    while i + 4 <= data.len() {
+        let ty = data[i];
+        let hlen = data[i + 1] as usize;
+        if hlen < 4 || i + hlen > data.len() {
+            break;
+        }
+        if ty == 1 && hlen >= 0x19 {
+            let mut uuid = [0u8; 16];
+            uuid.copy_from_slice(&data[i + 8..i + 24]);
+            let blank = uuid.iter().all(|&b| b == 0) || uuid.iter().all(|&b| b == 0xff);
+            // A UUID some boards ship with for every unit.
+            let generic = uuid == [0x03, 0, 0x02, 0, 0x04, 0, 0x05, 0, 0x00, 0x06, 0x00, 0x07, 0x00, 0x08, 0x00, 0x09];
+            return (!blank && !generic).then_some(uuid);
+        }
+        if ty == 127 {
+            break;
+        }
+        // Skip the formatted area and the string set (ends with two NULs).
+        let mut j = i + hlen;
+        while j + 1 < data.len() && !(data[j] == 0 && data[j + 1] == 0) {
+            j += 1;
+        }
+        i = j + 2;
+    }
+    None
+}
+
+fn machine_guid() -> Option<String> {
+    use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY};
+    winreg::RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey_with_flags("SOFTWARE\\Microsoft\\Cryptography", KEY_READ | KEY_WOW64_64KEY)
+        .ok()
+        .and_then(|k| k.get_value::<String, _>("MachineGuid").ok())
+        .filter(|g| g.len() >= 16)
+}
+
+/// Stable, non-reversible device id for licence activations.
+pub fn stable_device_id() -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let basis = if let Some(u) = smbios_uuid() {
+        format!("smbios:{}", u.iter().map(|b| format!("{b:02x}")).collect::<String>())
+    } else {
+        format!("machineguid:{}", machine_guid()?.to_ascii_lowercase())
+    };
+    let digest = Sha256::digest(format!("zirtola-device-v2|{basis}").as_bytes());
+    Some(zirtola_core::b64::encode_url(&digest))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn device_id_is_stable_and_opaque() {
+        // Same machine: same id every time (reinstalling the launcher reads the
+        // same hardware ids), and it is a 32-byte hash, not the raw UUID.
+        let a = super::stable_device_id().expect("a hardware id on this PC");
+        let b = super::stable_device_id().unwrap();
+        assert_eq!(a, b);
+        assert_eq!(a.len(), 43);
+        assert!(a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+    }
+}

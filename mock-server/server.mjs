@@ -333,6 +333,9 @@ function catalog() {
         install_size: lm ? lm.m.total_size : null,
         art: g.art,
         price: g.price ?? null,
+        sales_open: true,
+        checkout_url: `${BASE}/store/${g.id}`,
+        features: g.features ?? [],
       };
     }),
   };
@@ -513,6 +516,19 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { keys: [publicJwk(manifestKey), publicJwk(launchKey)] });
     }
     if (req.method === "GET" && p === "/v1/catalog") return send(res, 200, catalog());
+    if (req.method === "GET" && (r = m(/^\/v1\/games\/([a-z0-9-]+)\/changelog$/))) {
+      const gid = r[1];
+      if (!game(gid)) return err(res, 404, "not_found", "Unknown game.");
+      const rel = releases()[gid] || {};
+      const dir = join(DATA, "manifests", gid);
+      const versions = existsSync(dir) ? readdirSync(dir).map((f) => f.replace(/\.json$/, "")) : [];
+      const entries = versions
+        .map((v) => ({ v, m: loadManifest(gid, v)?.m }))
+        .filter((x) => x.m)
+        .sort((a, b) => b.m.created_at.localeCompare(a.m.created_at))
+        .map(({ v, m }) => ({ version: v, channel: "stable", released_at: m.created_at, notes: rel.notes?.[v] ?? "", current: rel.live === v }));
+      return send(res, 200, { game_id: gid, entries });
+    }
     if (req.method === "GET" && p === "/oauth/authorize") return authorizePage(res, q);
     if (req.method === "POST" && p === "/oauth/authorize/approve") return authorizeApprove(req, res);
     if (req.method === "POST" && p === "/oauth/token") return token(req, res);
@@ -565,24 +581,49 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === "POST" && p === "/v1/crashes") return crashUpload(req, res, acct);
       if (req.method === "GET" && p === "/v1/dev/hardware") return send(res, 200, hardware);
+      if (req.method === "GET" && (r = m(/^\/v1\/games\/([a-z0-9-]+)\/license$/))) {
+        const gid = r[1];
+        const ent = entitlementsFor(acct).find((e) => e.game_id === gid);
+        if (!ent) return err(res, 404, "not_found", "No licence found.");
+        const ownKey = Object.keys(state.redeemed).find((k) => state.redeemed[k].account === acct && fixtures.keys.find((x) => x.key === k)?.game_id === gid) ?? null;
+        const set = activations[`${acct}:${gid}`] || new Map();
+        return send(res, 200, {
+          game_id: gid, game_title: game(gid).title, source: ent.kind, granted_at: ent.granted_at, order_number: null,
+          key: ownKey, key_masked: ownKey ? ownKey.replace(/^(.{4})-(.{4})-(.{4})/, "XXXX-XXXX-XXXX") : null,
+          activations: [...set.entries()].map(([dev, a]) => ({ id: `${acct}:${gid}:${dev}`, name: a.name || "a PC", activated_at: new Date(a.first * 1000).toISOString(), last_seen_at: new Date(a.last * 1000).toISOString(), this_device: dev === req.headers["x-zirtola-device"] })),
+        });
+      }
+      if (req.method === "POST" && p === "/v1/activations/deactivate") {
+        const { activation_id } = await readBody(req);
+        const [a, gid, dev] = String(activation_id || "").split(":");
+        if (a !== acct || !activations[`${a}:${gid}`]?.delete(dev)) return err(res, 404, "not_found", "That device isn't active on your account.");
+        return send(res, 200, { ok: true });
+      }
       if (req.method === "POST" && p === "/v1/launch-tokens") {
         const { game_id, device_id, device_name } = await readBody(req);
         if (!game(game_id)) return err(res, 404, "not_found", "Unknown game.");
         if (!owns(acct, game_id)) return err(res, 403, "not_entitled", "This account does not own the game.");
-        if (device_id) {
-          // Activations: up to 5 devices per account and game (in memory).
-          const key = `${acct}:${game_id}`;
-          const set = (activations[key] ||= new Map());
-          if (!set.has(device_id) && set.size >= 5) {
-            return err(res, 403, "activation_limit", "This license is already active on 5 devices. Contact support to reset your devices.");
-          }
-          set.set(device_id, { name: String(device_name || ""), last: now() });
+        if (!/^[A-Za-z0-9_-]{16,128}$/.test(String(device_id || ""))) return err(res, 400, "bad_request", "A device id is required.");
+        // Activations: one device per licence (in memory), like the website.
+        const key = `${acct}:${game_id}`;
+        const set = (activations[key] ||= new Map());
+        if (!set.has(device_id) && set.size >= 1) {
+          const [otherId, other] = [...set.entries()][0];
+          return send(res, 409, {
+            error: "device_conflict",
+            message: `${game(game_id).title} is active on ${other.name || "another PC"} (last used ${new Date(other.last * 1000).toDateString()}). Deactivate it to play here.`,
+            limit: 1,
+            active_devices: [{ id: `${key}:${otherId}`, name: other.name || "another PC", activated_at: new Date(other.first * 1000).toISOString(), last_seen_at: new Date(other.last * 1000).toISOString() }],
+          });
         }
+        const prev = set.get(device_id);
+        set.set(device_id, { name: String(device_name || ""), first: prev?.first ?? now(), last: now() });
         const ent = entitlementsFor(acct).find((e) => e.game_id === game_id);
         const iat = now();
         const claims = {
           iss: BASE, sub: acct, aud: `zirtola-game:${game_id}`, game: game_id, ent: ent.kind,
           iat, exp: iat + 300, jti: randomToken(12), name: account(acct).display_name,
+          addons: [], grace: 7 * 86400,
         };
         return send(res, 200, { token: signJwt(claims, launchKey), expires_at: new Date((iat + 300) * 1000).toISOString() });
       }

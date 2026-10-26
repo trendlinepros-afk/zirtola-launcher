@@ -1,0 +1,287 @@
+# Publishing guide: selling Dirt Digger through the Zirtola Launcher
+
+This guide is for doing it the first time. It covers what you set up once, what
+you do for every release, what players see, and a launch-day checklist.
+Where something happens on a website you control (Azure, Stripe, Railway,
+Cloudflare, GitHub), it says where to click.
+
+Words used below:
+
+- **Launcher**: the Zirtola Launcher app players install.
+- **Website**: zirtola.com (the `retail-store` repo, hosted on Railway).
+- **Build**: one packaged version of the game (for example Dirt Digger 0.2.0).
+- **Channel**: `beta` (testers) or `stable` (everyone). The website calls stable `live`.
+- **Secret**: a value that must never be shared, posted, committed to git or
+  pasted into a chat. Your secrets live in `C:\Users\Wicked\.zirtola-launcher-secrets\`.
+
+---
+
+## Part 1: one-time setup
+
+Do these in order. Steps 1 to 3 can start today; each one takes a few days of
+waiting on someone else, so start them early.
+
+### 1. Code-signing certificate (Azure Artifact Signing)
+
+Why: an unsigned installer shows "Windows protected your PC" and "Unknown
+publisher". Signing shows your name and builds trust with Windows over time.
+(Details and alternatives: `docs/SIGNING.md`.)
+
+1. Go to <https://portal.azure.com> and sign in (create a free Microsoft account if needed).
+2. Search for **Subscriptions** → **Add** → choose **Pay-As-You-Go**. Add a card.
+   Cost: about **$9.99/month** for Artifact Signing Basic.
+3. Search for **Artifact Signing accounts** (it may still say "Trusted Signing") → **Create**.
+   - Resource group: **Create new** → `zirtola`
+   - Account name: `zirtola-signing`
+   - Region: pick the one closest to you (East US is fine) → **Review + create** → **Create**.
+4. Open the new account → **Identity validation** → **New identity** → **Individual**
+   (or **Organization** if you have a registered company). Fill in your legal name and
+   address exactly as on your ID. Microsoft emails you to verify; this can take
+   **1 to 10 working days**.
+5. When the validation says **Completed**: **Certificate profiles** → **Create** →
+   **Public Trust** → name `zirtola-launcher` → pick your validated identity → **Create**.
+6. Search for **App registrations** → **New registration** → name `zirtola-launcher-ci` → **Register**.
+   Copy the **Application (client) ID** and **Directory (tenant) ID**.
+   Then **Certificates & secrets** → **New client secret** → copy the **Value** right away (shown once). This is a secret.
+7. Back on the Artifact Signing account → **Access control (IAM)** → **Add role assignment** →
+   role **Artifact Signing Certificate Profile Signer** → **Members** → select `zirtola-launcher-ci` → **Review + assign**.
+8. Note the account's **Endpoint** (on its Overview page, like `https://eus.codesigning.azure.net`).
+
+Turning signing on is then **one setting** (step 4 below adds them to GitHub):
+`ZIRTOLA_SIGN_MODE = azure`. Until then releases still build, just unsigned.
+
+### 2. Stripe (payments)
+
+1. Go to <https://dashboard.stripe.com/register> and create the account (you, not me).
+2. **Settings → Business details**: legal name, address, what you sell
+   ("Downloadable video games for Windows").
+3. **Settings → Payouts (Bank accounts and currencies)**: add the bank account Stripe pays you into.
+4. **Settings → Tax**: turn on **Stripe Tax**, set your origin address, and add the
+   registrations you have (your home state/country). Stripe then tells you when
+   you get close to other countries' or states' thresholds. Digital games are
+   taxed in many places (EU/UK VAT, some US states, Australia GST...). Ask an
+   accountant once which registrations you need.
+5. **Developers → API keys**: you'll need the **Secret key** (`sk_live_...`) for Railway. Secret.
+   (Also try everything with the **Test mode** toggle on first; test keys start with `sk_test_`.)
+6. **Developers → Webhooks → Add endpoint**:
+   - URL: `https://zirtola.com/api/webhooks/stripe`
+   - Events: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+     `checkout.session.async_payment_failed`, `checkout.session.expired`, `charge.refunded`
+   - After saving, **Reveal** the **Signing secret** (`whsec_...`). Secret.
+   If you already set this up for donations, just add `charge.refunded` if it's missing: the same endpoint handles games.
+
+### 3. Cloudflare R2 (where the game files are downloaded from)
+
+1. <https://dash.cloudflare.com> → sign up → **R2 Object Storage** → enable it (free up to 10 GB, no download fees).
+2. **Create bucket** → name `zirtola-cdn`.
+3. Bucket → **Settings** → **Custom Domains** → **Connect Domain** → `cdn.zirtola.com`
+   (your domain must be on Cloudflare; otherwise use **Public Development URL** for now).
+4. **R2 → Manage R2 API Tokens → Create API token** → permission **Object Read & Write**, bucket `zirtola-cdn`.
+   Copy the **Access Key ID**, **Secret Access Key** and the **S3 endpoint**. Secret.
+5. Install rclone (`winget install Rclone.Rclone`), then run `rclone config`:
+   new remote `r2`, type **s3**, provider **Cloudflare**, paste the keys and endpoint.
+   Test: `rclone lsd r2:` should list `zirtola-cdn`.
+
+The CDN address for the website is then `https://cdn.zirtola.com/{game}/chunks/{prefix}/{hash}`.
+
+### 4. GitHub (launcher releases)
+
+Repo `trendlinepros-afk/zirtola-launcher` → **Settings → Secrets and variables → Actions**:
+
+**Secrets** (New repository secret):
+
+| Name | Value |
+| --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY` | contents of `C:\Users\Wicked\.zirtola-launcher-secrets\updater.key` |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | contents of `updater.key.password` in the same folder |
+| `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` | from step 1.6 (when signing is ready) |
+
+**Variables** (Variables tab → New repository variable):
+
+| Name | Value |
+| --- | --- |
+| `ZIRTOLA_API_BASE` | `https://zirtola.com/api/launcher` |
+| `ZIRTOLA_SIGN_MODE` | `azure` (only once step 1 is finished; leave unset before) |
+| `AZURE_SIGNING_ENDPOINT` | the endpoint from step 1.8 |
+| `AZURE_SIGNING_ACCOUNT` | `zirtola-signing` |
+| `AZURE_SIGNING_PROFILE` | `zirtola-launcher` |
+
+Back up the whole `.zirtola-launcher-secrets` folder now (password manager or an
+encrypted USB stick). Losing `updater.key` means installed launchers can never
+update themselves again; losing `manifest-2026-10.json` means you need a launcher
+update before you can ship game builds.
+
+### 5. Railway (the website)
+
+1. Merge the website pull requests (licensing, then sales) into the branch Railway
+   deploys from. Railway redeploys and applies the database changes by itself
+   (they only add tables and columns).
+2. Railway → your project → the website service → **Variables** → **New Variable**,
+   one by one. The values for the launcher ones are in
+   `C:\Users\Wicked\.zirtola-launcher-secrets\RAILWAY_VARIABLES.txt`.
+
+| Variable | Where the value comes from |
+| --- | --- |
+| `LAUNCHER_LAUNCH_SIGNING_KEY` | RAILWAY_VARIABLES.txt (secret) |
+| `LAUNCHER_MANIFEST_PUBLIC_KEYS` | RAILWAY_VARIABLES.txt |
+| `LAUNCHER_PUBLISH_TOKEN` | RAILWAY_VARIABLES.txt (secret) |
+| `LAUNCHER_CDN_URL_TEMPLATE` | `https://cdn.zirtola.com/{game}/chunks/{prefix}/{hash}` |
+| `LAUNCHER_DOWNLOAD_URL` | `https://github.com/trendlinepros-afk/zirtola-launcher/releases/latest` |
+| `LAUNCHER_OFFLINE_GRACE_DAYS` | `7` (how long a game runs offline) |
+| `LAUNCHER_DEACTIVATIONS_PER_PERIOD` / `LAUNCHER_DEACTIVATION_PERIOD_DAYS` | `3` / `30` |
+| `LICENSE_KEY_SECRET` | optional: a long random string (lets owners view their licence key again; set once, never change). Left empty it is derived from `AUTH_SECRET`. |
+| `STRIPE_SECRET_KEY` | Stripe step 5 (`sk_live_...`; test with `sk_test_...` first) |
+| `STRIPE_WEBHOOK_SECRET` | Stripe step 6 (`whsec_...`) |
+| `MAILGUN_*` | already set if account emails work; receipts use them |
+
+Never set `STRIPE_API_BASE` on Railway: it is only for local tests.
+
+3. Redeploy (Railway → **Deployments** → **Redeploy**) and open
+   `https://zirtola.com/api/launcher/v1/config`: it should show JSON.
+
+### 6. The store page and price
+
+1. Sign in to zirtola.com as admin → **Studio → Games → Dirt Digger**: check the
+   title (Dirt Digger), tagline, description, feature list, screenshots and cover.
+   Website updates never change these on the live site; they are edited here.
+2. **Studio → Licensing → Launcher catalogue → Dirt Digger → Manage**:
+   - **Price**: `19.99`, currency `USD`.
+   - **Devices per license**: `1` (games created before this update keep their old limit until you change it here).
+   - **Sales open**: leave **off** until launch day. Players see the Purchase
+     button greyed out with "Coming soon".
+   - **Show this game in the Zirtola Launcher**: on.
+3. Do the same for Alaskan Bush Simulator when it's ready.
+
+---
+
+## Part 2: shipping a game release
+
+### Write the release notes
+
+Create `Tools\release\release-notes\<version>.md` in the game repo
+(`E:\Game Development\Voxel Mining`). Players see this text in the launcher's
+"What's new" and on the website's Changelog. Write it for players:
+
+```markdown
+## Dirt Digger 0.2.0
+
+- New: the wheel loader can now fill trucks.
+- Fixed: the bucket no longer clips through rock.
+```
+
+Versions use `MAJOR.MINOR.PATCH` (0.2.0, 0.2.1 ...). Never reuse a number.
+
+### Release to beta, check it, then stable
+
+From `E:\Game Development\Voxel Mining` in PowerShell:
+
+```powershell
+$env:ZIRTOLA_PUBLISH_TOKEN = "<LAUNCHER_PUBLISH_TOKEN from RAILWAY_VARIABLES.txt>"
+$env:ZIRTOLA_RCLONE_REMOTE = "r2:zirtola-cdn"
+
+# 1. Dry run: packages nothing, uploads nothing, shows what would happen
+node Tools\release\release.mjs --version 0.2.0 --channel beta --dry-run
+
+# 2. Beta: packages (10-60 min), signs, uploads, publishes to testers
+node Tools\release\release.mjs --version 0.2.0 --channel beta
+```
+
+Testers are players you gave beta access (**Studio → Licensing → a player →
+Give a license → tick Beta access**). They switch **Beta: on** next to Play in the launcher.
+
+**Check it worked:**
+
+1. **Studio → Licensing → Launcher catalogue → Dirt Digger**: 0.2.0 shows as **live** on `beta`.
+2. In your own launcher (with beta on): it offers "Update to 0.2.0", the update
+   downloads only what changed, and "What's new" shows your notes.
+3. Start the game. Watch **Studio → Crash reports** for a day or two.
+
+When happy, give it to everyone:
+
+```powershell
+node Tools\release\release.mjs promote --version 0.2.0
+```
+
+Everyone's launcher offers the update on its next refresh (when they open it,
+or within 15 minutes).
+
+### Rolling back
+
+**Studio → Licensing → Launcher catalogue → Dirt Digger → Builds** → on the
+previous version click **Make live**. Launchers offer that version as the
+update. Then fix and release a new version number (never re-release the same number).
+
+### Shipping a launcher release
+
+From `E:\Game Development\Zirtola Launcher`:
+
+1. Write `release-notes\0.2.0.md` (see `release-notes\TEMPLATE.md`).
+2. `node scripts\release-launcher.mjs --version 0.2.0 --dry-run`, then without `--dry-run`.
+   It bumps the version, updates `CHANGELOG.md`, commits, tags `v0.2.0` and pushes the tag.
+3. GitHub → **Actions** shows "Release" running (about 15 minutes). When green:
+   GitHub → **Releases** → the draft **Zirtola Launcher v0.2.0** → check the installer
+   is attached (and signed: right-click the downloaded `.exe` → Properties → **Digital Signatures**) → **Publish release**.
+4. Installed launchers show "Launcher 0.2.0 · Restart to update" in the sidebar.
+
+Rolling back a launcher release: GitHub → Releases → edit the bad release →
+**Set as a pre-release** (or delete it). `latest.json` then points at the previous release.
+
+---
+
+## Part 3: what players see
+
+1. On zirtola.com, the Dirt Digger page shows **$19.99** with **Purchase** (or a
+   greyed-out Purchase and "Coming soon" while sales are closed), and the
+   "what's included" note: *The base game includes every machine released so far.
+   Some future, highly detailed machines may be sold separately as optional add-ons.*
+2. **Purchase** → checkout page (sign in or create an account, tick the terms) →
+   Stripe's secure payment page → **"Dirt Digger is yours"** with the order number,
+   a receipt email, and **Open the Zirtola Launcher**.
+3. In the launcher (signed in with the same account) Dirt Digger turns from
+   locked to **Ready to install** within seconds (or immediately via the button).
+4. Install → Play. The first PC is activated. On a second PC the launcher says
+   *Dirt Digger is active on <PC> (last used <date>). Deactivate it to play here.*
+   with a button to move it; or the player does it on **Settings → My games & keys**.
+5. Updates show up as **Update to x.y.z**; after updating, **What's new** opens with
+   the notes, the installed version highlighted. Settings → **Orders** lists receipts.
+6. Offline, the game keeps working for 7 days on its last check.
+
+Screenshots of every step (from the local test-mode run): `docs/screenshots/sale-e2e/`.
+
+---
+
+## Part 4: launch-day checklist
+
+The week before:
+
+- [ ] Signing done: a test launcher release's installer shows your name under **Digital Signatures**.
+- [ ] Stripe account activated, payouts and tax set, webhook added with all 5 events.
+- [ ] Railway variables set; `https://zirtola.com/api/launcher/v1/config` answers.
+- [ ] Dirt Digger stable build published; you installed it on a clean PC from the website's download link.
+- [ ] **Test mode run on the live site**: switch Railway's Stripe keys to `sk_test_`/test webhook secret,
+      buy with card `4242 4242 4242 4242`, see it in the launcher, refund it in **Studio → Licensing → Sales**,
+      see it disappear. Switch back to live keys.
+- [ ] Terms page (**/terms#buying**) reads right for you; support email works.
+
+On the day:
+
+- [ ] **Studio → Licensing → Launcher catalogue → Dirt Digger → Sales open** on → **Save**.
+- [ ] Buy it yourself once with a real card and refund it (proves live payments end to end).
+- [ ] Post the announcement with the link `https://zirtola.com/games/dirt-simulator`.
+- [ ] Keep **Studio → Licensing → Sales** and **Studio → Crash reports** open for the day.
+
+Afterwards: payouts arrive per Stripe's schedule (usually 2 to 7 days); Stripe's
+fee is roughly 2.9% + 30¢ per card payment (more for international cards).
+
+---
+
+## What I could not do for you
+
+These need your accounts, identity or money, so they're yours:
+
+1. Azure: subscription, identity validation, certificate profile, app registration (Part 1.1).
+2. Stripe: account, business details, bank, tax, live keys, webhook (Part 1.2).
+3. Cloudflare R2 bucket, domain, API token, rclone setup (Part 1.3).
+4. GitHub secrets and variables (Part 1.4).
+5. Railway variables and merging the website PRs (Part 1.5).
+6. Optional: winget submission (`docs/DISTRIBUTION.md`).

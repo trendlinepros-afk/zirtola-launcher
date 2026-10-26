@@ -1,0 +1,9 @@
+[mail] not configured — would send "Your receipt: Dirt Simulator [TEST MODE, no money was charged]" to pixel_pioneer@example.com
+Order ZRT-P2910S5Y (2026-10-26)
+Dirt Simulator: $19.99 [TEST MODE, no money was charged]
+
+The base game includes every machine released so far. Some future, highly detailed machines may be sold separately as optional add-ons.
+
+Open the Zirtola Launcher and sign in with this account to install it.
+Your order: http://localhost:3000/settings/orders/cmvpns1x80063lyekp2910s5y
+

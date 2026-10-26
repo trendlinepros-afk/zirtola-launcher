@@ -11,3 +11,4 @@ zirtola-core = { path = "../../crates/zirtola-core" }
 anyhow.workspace = true
 tokio.workspace = true
 chrono.workspace = true
+serde_json.workspace = true

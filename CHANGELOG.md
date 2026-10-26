@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- One device per licence: playing on a second PC shows who has it ("Dirt Digger is
+  active on <device> (last used <date>)") with **Deactivate and play here**; device ids
+  come from the firmware UUID so reinstalls and upgrades keep the activation.
+- Offline play keeps working for the licence's grace period (7 days by default).
+- **What's new** per game (newest first, installed version marked), opened by itself
+  after an update; **Beta** toggle for accounts with beta access.
+- **View license key** button for owned games: masked key with Show and Copy, where
+  the licence came from, and which PC it is active on. Fetched live, never stored.
+- Games not on sale yet show a disabled **Buy · price** button with "Coming soon".
+- The Store button never fails silently: it falls back to the site's games page and
+  shows a message when the browser can't be opened.
+- Production manifest and launch keys (2026-10) pinned; the repository is now
+  `trendlinepros-afk/zirtola-launcher`.
 - Buying: locked games show a lock badge and "Buy on the website" (with the price
   when the website provides one); after clicking it the launcher waits for the
   purchase (every 7 s for up to 15 minutes, immediately on window focus and on

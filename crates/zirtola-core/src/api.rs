@@ -82,6 +82,15 @@ pub struct CatalogGame {
     /// Shown on the "Buy on the website" button when the website provides it.
     #[serde(default)]
     pub price: Option<Price>,
+    /// `Some(false)`: priced but not on sale yet ("Coming soon").
+    #[serde(default)]
+    pub sales_open: Option<bool>,
+    /// The website's checkout page for this game, if it sells it directly.
+    #[serde(default)]
+    pub checkout_url: Option<String>,
+    /// Store-page bullet points.
+    #[serde(default)]
+    pub features: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +108,9 @@ pub struct Entitlement {
     pub expires_at: Option<String>,
     #[serde(default = "default_branches")]
     pub branches: Vec<String>,
+    /// Add-on (DLC) skus owned for this game; never needed to install it.
+    #[serde(default)]
+    pub addons: Vec<String>,
 }
 
 fn default_branches() -> Vec<String> {
@@ -159,6 +171,8 @@ pub enum ApiError {
         status: u16,
         code: String,
         message: String,
+        /// The full error body (e.g. `active_devices` for `device_conflict`).
+        details: Option<serde_json::Value>,
     },
 }
 
@@ -238,6 +252,7 @@ impl ApiClient {
             status: code,
             code: error,
             message,
+            details: serde_json::from_str(&text).ok(),
         })
     }
 
@@ -357,6 +372,36 @@ impl ApiClient {
             path.push_str(v);
         }
         self.get(&path, Some(at)).await
+    }
+
+    /// Deactivate one of the account's devices (frees the licence slot).
+    pub async fn deactivate_device(&self, at: &str, activation_id: &str) -> Result<(), ApiError> {
+        self.post::<_, serde_json::Value>(
+            "/v1/activations/deactivate",
+            Some(at),
+            &serde_json::json!({ "activation_id": activation_id }),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// The account's licence for a game, including its key ("View license key").
+    /// `device_id` lets the website mark which activation is this PC.
+    pub async fn license(&self, at: &str, game_id: &str, device_id: &str) -> Result<serde_json::Value, ApiError> {
+        let resp = self
+            .http
+            .get(self.url(&format!("/v1/games/{game_id}/license")))
+            .bearer_auth(at)
+            .header("X-Zirtola-Device", device_id)
+            .send()
+            .await?;
+        Self::decode(resp).await
+    }
+
+    /// Release notes per version, newest first (public).
+    pub async fn changelog(&self, game_id: &str, branch: &str) -> Result<serde_json::Value, ApiError> {
+        self.get(&format!("/v1/games/{game_id}/changelog?branch={branch}"), None)
+            .await
     }
 
     /// Report this PC's hardware (only when the player allows it).

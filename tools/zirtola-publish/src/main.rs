@@ -72,6 +72,9 @@ enum Cmd {
         key: Option<PathBuf>,
         #[arg(long)]
         out: PathBuf,
+        /// Build id to record (default: a hash of the version and file contents).
+        #[arg(long = "build-id")]
+        build_id: Option<String>,
     },
 }
 
@@ -153,12 +156,19 @@ fn main() -> Result<()> {
             store,
             key,
             out,
+            build_id,
         } => {
             if !zirtola_core::install::valid_game_id(&game) {
                 anyhow::bail!("game id must be a lowercase slug");
             }
             let (kid, sk) = load_key(key.as_deref())?;
-            let m = build(&game, &version, &platform, &exe, args, &input, &store)?;
+            let mut m = build(&game, &version, &platform, &exe, args, &input, &store)?;
+            if let Some(id) = build_id {
+                if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || "+-._".contains(c)) {
+                    anyhow::bail!("--build-id: up to 64 chars of letters, digits and + - . _");
+                }
+                m.build_id = id;
+            }
             let env = SignedManifest::sign(&m, &kid, &sk)?;
             if let Some(dir) = out.parent() {
                 std::fs::create_dir_all(dir)?;

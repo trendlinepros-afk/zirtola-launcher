@@ -1,3 +1,18 @@
 {
-  "keys": []
+  "keys": [
+    {
+      "kid": "manifest-2026-10",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "use": "manifest",
+      "x": "m4tN9OFAChrnW-oecfLeX4d4zt2f9-wKe68MfsI_mho"
+    },
+    {
+      "kid": "launch-2026-10",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "use": "launch",
+      "x": "kzpWLji2VQo2_auwLmGWLOag05u7SBkYx-4laYZK6wY"
+    }
+  ]
 }

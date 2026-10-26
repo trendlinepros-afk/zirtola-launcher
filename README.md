@@ -4,8 +4,6 @@ The Windows desktop launcher for Zirtola games. Players install it from the
 studio's website, sign in with their Zirtola account (the same account as on
 the website), and download, update, verify and play the games they own.
 
-> The repository is named `zitrola-launcher`; the product is **Zirtola**.
-
 | Sign in | Downloading | Patching (only changed chunks) |
 | --- | --- | --- |
 | ![Sign in](docs/screenshots/sign-in.png) | ![Downloading](docs/screenshots/downloading.png) | ![Patching](docs/screenshots/patching.png) |
@@ -172,6 +170,13 @@ See **[docs/SIGNING.md](docs/SIGNING.md)**. Recommendation: **Azure Artifact
 Signing** (~$9.99/month) if the studio is eligible (US/Canada individuals, or
 companies in the US, Canada, EU, UK); otherwise an OV certificate with cloud
 signing (~$150–400/year). EV no longer skips SmartScreen (since March 2024).
+
+## Distribution without a certificate yet
+
+See **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)**: which channels are
+legitimate before we have a code-signing certificate (website + winget now,
+signing as soon as possible), and why the Microsoft Store, a zip or a
+bootstrapper do not work for this launcher.
 
 ## Releasing
 

@@ -12,6 +12,7 @@ import {
   onLauncherUpdateProgress,
   type AppInfo,
   type CatalogGame,
+  type CmdError,
   type JobProgress,
   type LibraryGame,
   type Me,
@@ -20,6 +21,13 @@ import {
 import { icons, keyArt, logoMark } from "./art";
 import * as fmt from "./format";
 import { focusFirst, onGamepadActive, onNavAction } from "./nav";
+import { buyUrl, openLink, storeUrl } from "./links";
+import { needsRecheck, runStartupChecks } from "./startup";
+
+// Open a website link; on failure (no URL yet, browser blocked) tell the player.
+function openSite(url: string | null | undefined, what: string) {
+  return openLink(url, what, { openUrl: api.openUrl, toast, describeError: errorMessage });
+}
 
 // ------------------------------------------------------------------ state
 
@@ -39,6 +47,10 @@ const S = {
   settings: null as Settings | null,
   launcherUpdate: null as { version: string; notes: string | null } | null,
   launcherUpdating: null as { downloaded: number; total: number | null } | null,
+  // Update checks: when the last one succeeded, and a small note if it couldn't run.
+  lastUpdateCheck: null as number | null,
+  checkingUpdates: false,
+  updateNote: null as string | null,
   gamepad: false,
   // Purchases the player started from the launcher: game id -> start time.
   pending: new Map<string, number>(),
@@ -156,7 +168,7 @@ function signInScreen() {
       S.offline ? h("p", { class: "error-text" }, S.offline) : null,
       S.offline ? btn("retry", "Retry", boot, { cls: "ghost" }) : null,
       S.info?.account_url
-        ? h("p", { class: "muted small" }, "No account yet? ", h("a", { href: "#", "data-nav": true, "data-id": "create-account", onclick: (e: Event) => { e.preventDefault(); api.openUrl(S.info!.account_url!); } }, "Create one on the website"), ".")
+        ? h("p", { class: "muted small" }, "No account yet? ", h("a", { href: "#", "data-nav": true, "data-id": "create-account", onclick: (e: Event) => { e.preventDefault(); void openSite(S.info?.account_url, "account page"); } }, "Create one on the website"), ".")
         : null,
     ),
     h(
@@ -216,7 +228,7 @@ function sidebar() {
     item("library", "Library", icons.library),
     h(
       "button",
-      { class: "nav-item", "data-id": "nav-store", type: "button", onclick: () => S.info?.store_url && api.openUrl(S.info.store_url) },
+      { class: "nav-item", "data-id": "nav-store", type: "button", onclick: () => void openSite(storeUrl(S.info), "store") },
       h("span", { class: "ico", html: icons.store }),
       h("span", {}, "Store"),
       h("span", { class: "ico trailing", html: icons.external }),
@@ -281,7 +293,12 @@ function selectedGame(): LibraryGame | undefined {
 function libraryView() {
   const g = selectedGame();
   if (!g) return h("div", { class: "empty" }, h("div", { class: "spinner" }));
-  return h("div", { class: "library" }, hero(g), shelf());
+  const note = S.checkingUpdates
+    ? h("p", { class: "update-note", "data-id": "update-note" }, h("span", { class: "spinner small" }), "Checking for updates…")
+    : S.updateNote
+      ? h("p", { class: "update-note", "data-id": "update-note" }, S.updateNote)
+      : null;
+  return h("div", { class: "library" }, note, hero(g), shelf());
 }
 
 function hero(lg: LibraryGame) {
@@ -302,11 +319,23 @@ function hero(lg: LibraryGame) {
     h(
       "div",
       { class: "hero-body" },
-      h("span", { class: `pill ${g.status}` }, fmt.statusLabel(g.status)),
+      h(
+        "div",
+        { class: "pills" },
+        h("span", { class: `pill ${g.status}` }, fmt.statusLabel(g.status)),
+        lg.owned && inst?.update_available
+          ? h(
+              "button",
+              { class: "pill update", type: "button", "data-id": "update-available", title: "See what's new", onclick: () => void whatsNew(lg) },
+              `Update available${inst.latest_version ? ` · ${inst.latest_version}` : ""} · What's new`,
+            )
+          : null,
+      ),
       h("h1", {}, g.title),
       h("p", { class: "tagline" }, g.tagline),
       h("p", { class: "desc" }, g.description),
       meta.length ? h("p", { class: "meta" }, meta.join("  ·  ")) : null,
+      requirementsLine(g),
       lg.job || p ? progressPanel(lg, p) : actions(lg),
     ),
   );
@@ -370,6 +399,37 @@ function updateProgressDom(p: JobProgress) {
   return true;
 }
 
+// The website's FAQ about moving a licence between PCs.
+function devicesFaqUrl(): string | null {
+  try {
+    return S.info ? `${new URL(S.info.api_base).origin}/terms#faq-devices` : null;
+  } catch {
+    return null;
+  }
+}
+
+// Small links under the game info: "System requirements" (the website's
+// section, with the minimum inline) and, while in early access, "Report a bug"
+// (the game's bug forum). Crash reports stay in their own prompt.
+function requirementsLine(g: CatalogGame) {
+  const r = g.requirements;
+  const bug = g.early_access && g.bug_report_url ? g.bug_report_url : null;
+  if (!r?.url && !bug) return null;
+  const link = (id: string, label: string, url: string, what: string, icon?: string) =>
+    h("a", { href: "#", "data-id": id, onclick: (e: Event) => { e.preventDefault(); void openSite(url, what); } }, ...(icon ? [h("span", { class: "ico", html: icon })] : []), label);
+  return h(
+    "div",
+    { class: "reqs" },
+    h(
+      "p",
+      { class: "reqs-links" },
+      r?.url ? link("requirements", "System requirements", r.url, "system requirements") : null,
+      bug ? link("report-bug", "Report a bug", bug, "bug forum", icons.bug) : null,
+    ),
+    r?.minimum_summary ? h("p", { class: "reqs-min" }, `Minimum: ${r.minimum_summary}${r.minimum_target ? ` (${r.minimum_target})` : ""}`) : null,
+  );
+}
+
 function buyLabel(g: CatalogGame): string {
   const price = fmt.price(g.price);
   return price ? `Buy on the website · ${price}` : "Buy on the website";
@@ -381,6 +441,15 @@ function actions(lg: LibraryGame) {
   const row = h("div", { class: "actions" });
   if (!lg.owned) {
     if (S.pending.has(g.id)) return waitingPanel(g);
+    if (g.sales_open === false) {
+      row.append(
+        btn("store", buyLabel(g).replace("Buy on the website", "Buy"), () => {}, { cls: "primary big", icon: icons.store, disabled: true, title: "Not on sale yet" }),
+        h("span", { class: "soon-badge" }, "Coming soon"),
+        btn("store-page", "Store page", () => void openSite(g.store_url, "store page"), { cls: "ghost big", icon: icons.external }),
+        btn("redeem", "Redeem a key", () => redeemDialog(), { cls: "ghost big", icon: icons.key }),
+      );
+      return row;
+    }
     row.append(
       btn("store", buyLabel(g), () => buy(g), { cls: "primary big", icon: icons.store }),
       btn("redeem", "Redeem a key", () => redeemDialog(), { cls: "ghost big", icon: icons.key }),
@@ -389,6 +458,7 @@ function actions(lg: LibraryGame) {
   }
   if (!inst) {
     row.append(btn("install", "Install", () => installDialog(lg), { cls: "primary big", icon: icons.download }));
+    row.append(btn("license", "", () => void licenseDialog(lg), { cls: "ghost square", icon: icons.key, title: "View license key" }));
     if (S.justOwned.has(g.id)) row.append(h("span", { class: "ready-note" }, h("span", { class: "ico", html: icons.check }), "Purchase complete. Ready to install."));
     return row;
   }
@@ -411,8 +481,19 @@ function actions(lg: LibraryGame) {
   } else {
     row.append(btn("play", "Play", () => launch(g), { cls: "primary big play", icon: icons.play }));
   }
+  if (lg.branches.includes("beta")) {
+    const onBeta = lg.branch === "beta";
+    row.append(
+      btn("channel", onBeta ? "Beta: on" : "Beta: off", async () => {
+        await run(() => api.setBranch(g.id, onBeta ? "live" : "beta"));
+        toast(onBeta ? `${g.title} follows the stable channel again.` : `${g.title} now gets beta updates.`);
+      }, { cls: `ghost ${onBeta ? "beta-on" : ""}`, title: "Switch between the stable and beta channels" }),
+    );
+  }
   row.append(
+    btn("whats-new", "", () => void whatsNew(lg), { cls: "ghost square", icon: icons.notes, title: "What's new (release notes)" }),
     btn("verify", "", () => run(() => api.verify(g.id)), { cls: "ghost square", icon: icons.check, title: "Verify and repair files" }),
+    btn("license", "", () => void licenseDialog(lg), { cls: "ghost square", icon: icons.key, title: "View license key" }),
     btn("folder", "", () => api.openFolder(g.id), { cls: "ghost square", icon: icons.folder, title: "Open install folder" }),
     btn("uninstall", "", () => confirmUninstall(lg), { cls: "ghost square", icon: icons.trash, title: "Uninstall" }),
   );
@@ -447,7 +528,7 @@ function savePending() {
 function buy(g: CatalogGame) {
   S.pending.set(g.id, Date.now());
   savePending();
-  api.openUrl(g.store_url).catch(handleError);
+  void openSite(buyUrl(g), "checkout page");
   render();
   schedulePurchasePoll();
 }
@@ -470,7 +551,7 @@ function waitingPanel(g: CatalogGame) {
       h("small", {}, "Finish buying on the website. The game appears here as soon as the purchase goes through."),
     ),
     btn("purchase-refresh", "Refresh", () => void refreshNow(), { cls: "ghost", icon: icons.update }),
-    btn("purchase-store", "", () => api.openUrl(g.store_url).catch(handleError), { cls: "ghost square", icon: icons.external, title: "Open the store page again" }),
+    btn("purchase-store", "", () => void openSite(buyUrl(g), "checkout page"), { cls: "ghost square", icon: icons.external, title: "Open the store page again" }),
     btn("purchase-cancel", "", () => stopWaiting(g.id), { cls: "ghost square", icon: icons.close, title: "Stop waiting" }),
   );
 }
@@ -581,12 +662,257 @@ async function run(fn: () => Promise<unknown>) {
 }
 
 async function launch(g: CatalogGame) {
+  // Re-check for a game update if the last check is more than ~10 minutes old.
+  if (S.me && needsRecheck(S.lastUpdateCheck, Date.now())) {
+    await loadLibrary();
+    const lg = S.library.find((x) => x.game.id === g.id);
+    if (lg?.install?.update_available && !lg.job) {
+      if (S.settings?.auto_update_games) {
+        toast(`${g.title} ${lg.install.latest_version ?? ""} is out. Updating first; press Play when it's done.`);
+        await run(() => api.update(g.id));
+        return;
+      }
+      toast(`${g.title} ${lg.install.latest_version ?? ""} is available. Starting the version you have.`);
+    }
+  }
   try {
     await api.launch(g.id, g.title);
     toast(`Starting ${g.title}…`);
   } catch (e) {
-    handleError(e);
+    if (errorCode(e) === "device_conflict") deviceConflictDialog(g, e as CmdError);
+    else handleError(e);
   }
+}
+
+// One PC per licence: the server refused this PC because another one is
+// active. Offer to deactivate it here (the player is signed in; they confirm).
+function deviceConflictDialog(g: CatalogGame, e: CmdError) {
+  const devices = e.details?.active_devices ?? [];
+  const msg = h("p", { class: "muted" }, e.message);
+  const list = h(
+    "div",
+    { class: "device-list" },
+    ...devices.map((d) =>
+      h(
+        "div",
+        { class: "device-row" },
+        h("div", {}, h("strong", {}, d.name), h("small", {}, `Activated ${new Date(d.activated_at).toLocaleDateString()} · last used ${new Date(d.last_seen_at).toLocaleDateString()}`)),
+        btn(`deactivate-${d.id}`, "Deactivate and play here", async () => {
+          if (!confirmBox.checked) {
+            note.textContent = "Tick the box to confirm first.";
+            note.className = "error-text";
+            return;
+          }
+          try {
+            await api.deactivateDevice(d.id);
+            close();
+            toast(`${d.name} deactivated. Starting ${g.title} on this PC…`);
+            await launch(g);
+          } catch (err) {
+            note.textContent = errorMessage(err);
+            note.className = "error-text";
+          }
+        }, { cls: "primary" }),
+      ),
+    ),
+  );
+  const confirmBox = h("input", { type: "checkbox", "data-id": "confirm-deactivate" }) as HTMLInputElement;
+  const note = h(
+    "p",
+    { class: "muted small" },
+    "Your licence moves with you: it plays on one PC at a time, and you can switch whenever you like. Deactivating is free and the other PC simply stops until you move it back. You can also do this from your account page on the website. ",
+    h("a", { href: "#", "data-id": "devices-learn-more", onclick: (e: Event) => { e.preventDefault(); void openSite(devicesFaqUrl(), "help page"); } }, "Learn more"),
+  );
+  const close = modal(
+    `${g.title} is active on another PC`,
+    h(
+      "div",
+      {},
+      msg,
+      list,
+      h("label", { class: "confirm-row" }, confirmBox, h("span", {}, `I'm signed in as ${S.me?.display_name ?? "me"} and want to move ${g.title} to this PC.`)),
+      note,
+      h("div", { class: "modal-actions" }, btn("cancel", "Not now", () => close(), { cls: "ghost" })),
+    ),
+  );
+}
+
+// ------------------------------------------------------------------ license key
+
+const SOURCE_LABEL: Record<string, string> = { purchase: "Purchase", key: "Redeemed key", grant: "Gift from the studio", early_access: "Early access" };
+
+// Fetched live from the website for the signed-in account each time; the key
+// is only kept in this dialog's memory, never written to disk.
+async function licenseDialog(lg: LibraryGame) {
+  let lic: Awaited<ReturnType<typeof api.license>>;
+  try {
+    lic = await api.license(lg.game.id);
+  } catch (e) {
+    handleError(e);
+    return;
+  }
+  let shown = false;
+  const keyText = h("code", { class: "license-key", "data-id": "license-key" }, lic.key_masked ?? "");
+  const showBtn = btn("license-show", "Show", () => {
+    shown = !shown;
+    keyText.textContent = shown ? lic.key : lic.key_masked;
+    showBtn.querySelector("span:last-child")!.textContent = shown ? "Hide" : "Show";
+  }, { cls: "ghost" });
+  const keyBlock = lic.key
+    ? h(
+        "div",
+        { class: "license-key-row" },
+        keyText,
+        showBtn,
+        btn("license-copy", "Copy", async () => {
+          try {
+            await navigator.clipboard.writeText(lic.key!);
+            toast("Copied");
+          } catch {
+            toast("Couldn't copy. Show the key and copy it by hand.", "error");
+          }
+        }, { cls: "ghost" }),
+      )
+    : h("p", { class: "license-none" }, "This game is tied to your Zirtola account. No key needed.");
+
+  const details = h(
+    "dl",
+    { class: "license-details" },
+    h("dt", {}, "Game"), h("dd", {}, lic.game_title),
+    h("dt", {}, "From"), h("dd", {}, SOURCE_LABEL[lic.source] ?? lic.source),
+    h("dt", {}, "Date"), h("dd", {}, new Date(lic.granted_at).toLocaleDateString()),
+    ...(lic.order_number ? [h("dt", {}, "Order"), h("dd", {}, lic.order_number)] : []),
+  );
+
+  const act = h("div", { class: "license-activation" });
+  const here = lic.activations.find((a) => a.this_device);
+  const other = lic.activations.find((a) => !a.this_device);
+  if (here) act.append(h("p", {}, h("strong", {}, "Active on this PC"), ` (${here.name})`));
+  if (other) {
+    act.append(
+      h(
+        "div",
+        { class: "device-row" },
+        h("div", {}, h("strong", {}, `Active on ${other.name}`), h("small", {}, `last seen ${new Date(other.last_seen_at).toLocaleDateString()}`)),
+        btn("license-deactivate", "Deactivate", async () => {
+          if (!window.confirm(`Deactivate ${lg.game.title} on ${other.name}? It stops working there until you move it back.`)) return;
+          try {
+            await api.deactivateDevice(other.id);
+            close();
+            toast(`${other.name} deactivated.`);
+          } catch (e) {
+            handleError(e);
+          }
+        }, { cls: "ghost" }),
+      ),
+    );
+  }
+  if (!here && !other) act.append(h("p", { class: "muted" }, "Not active on any PC yet. Playing activates this PC."));
+  act.append(
+    h(
+      "p",
+      { class: "muted small" },
+      "Plays on one PC at a time; switch whenever you like. ",
+      h("a", { href: "#", onclick: (e: Event) => { e.preventDefault(); void openSite(devicesFaqUrl(), "help page"); } }, "Learn more"),
+    ),
+  );
+  const accountUrl = (() => {
+    try {
+      return S.info ? `${new URL(S.info.api_base).origin}/settings/games` : null;
+    } catch {
+      return null;
+    }
+  })();
+  act.append(
+    h("a", { href: "#", class: "small", "data-nav": true, "data-id": "license-account", onclick: (e: Event) => { e.preventDefault(); void openSite(accountUrl, "account page"); } }, "All your devices on the website"),
+  );
+
+  const close = modal(
+    `${lg.game.title}: license`,
+    h(
+      "div",
+      { class: "license" },
+      keyBlock,
+      details,
+      h("h4", {}, "Activation"),
+      act,
+      h("p", { class: "muted small license-safety" }, "Keep your key private. Anyone with it can try to claim your game."),
+      h("div", { class: "modal-actions" }, btn("license-close", "Close", () => close(), { cls: "ghost" })),
+    ),
+  );
+}
+
+// ------------------------------------------------------------------ what's new
+
+// Tiny Markdown subset for release notes: headings, lists, bold, code, links
+// as text. Everything is escaped first; no HTML from the server is trusted.
+function renderNotes(md: string): HTMLElement {
+  const box = h("div", { class: "notes" });
+  let list: HTMLElement | null = null;
+  const inline = (text: string) => {
+    const span = h("span", {});
+    const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+    for (const p of parts) {
+      if (/^\*\*[^*]+\*\*$/.test(p)) span.append(h("strong", {}, p.slice(2, -2)));
+      else if (/^`[^`]+`$/.test(p)) span.append(h("code", {}, p.slice(1, -1)));
+      else span.append(p.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1"));
+    }
+    return span;
+  };
+  for (const raw of md.split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    const item = /^\s*[-*]\s+(.*)$/.exec(line);
+    if (item) {
+      if (!list) {
+        list = h("ul", {});
+        box.append(list);
+      }
+      list.append(h("li", {}, inline(item[1]!)));
+      continue;
+    }
+    list = null;
+    if (!line.trim()) continue;
+    const head = /^#{1,3}\s+(.*)$/.exec(line);
+    box.append(head ? h("h4", {}, inline(head[1]!)) : h("p", {}, inline(line)));
+  }
+  return box;
+}
+
+async function whatsNew(lg: LibraryGame, opts: { afterUpdate?: boolean } = {}) {
+  let entries: Awaited<ReturnType<typeof api.changelog>>["entries"] = [];
+  try {
+    entries = (await api.changelog(lg.game.id)).entries;
+  } catch (e) {
+    toast(errorMessage(e), "error");
+    return;
+  }
+  const installed = lg.install?.version ?? null;
+  const body = h(
+    "div",
+    { class: "changelog" },
+    entries.length === 0
+      ? h("p", { class: "muted" }, "No release notes yet.")
+      : h(
+          "div",
+          {},
+          ...entries.map((en) =>
+            h(
+              "section",
+              { class: `cl-entry ${en.version === installed ? "installed" : ""}` },
+              h(
+                "div",
+                { class: "cl-head" },
+                h("strong", {}, en.version),
+                en.channel === "beta" ? h("span", { class: "pill beta" }, "Beta") : null,
+                en.version === installed ? h("span", { class: "pill installed" }, "Installed") : null,
+                h("small", {}, new Date(en.released_at).toLocaleDateString()),
+              ),
+              renderNotes(en.notes || "No notes for this version."),
+            ),
+          ),
+        ),
+  );
+  modal(opts.afterUpdate ? `${lg.game.title} updated: what's new` : `${lg.game.title}: updates`, h("div", {}, body));
 }
 
 function handleError(e: unknown) {
@@ -613,6 +939,8 @@ async function loadLibrary() {
     S.library = [...lib.filter((g) => g.owned), ...lib.filter((g) => !g.owned)];
     if (!S.selected || !S.library.some((g) => g.game.id === S.selected)) S.selected = S.library[0]?.game.id ?? null;
     S.offline = null;
+    S.lastUpdateCheck = Date.now();
+    S.updateNote = null;
     settlePurchases();
   } catch (e) {
     handleError(e);
@@ -732,18 +1060,42 @@ function redeemDialog() {
   setTimeout(() => input.focus(), 0);
 }
 
-function confirmUninstall(lg: LibraryGame) {
+async function confirmUninstall(lg: LibraryGame) {
+  const raw = lg.game.save_location ?? null;
+  const where = raw ? await api.resolveSaveLocation(raw).catch(() => null) : null;
+  const alsoSaves = h("input", { type: "checkbox", "data-id": "delete-saves" }) as HTMLInputElement;
   const close = modal(
     `Uninstall ${lg.game.title}?`,
     h(
       "div",
       {},
-      h("p", { class: "muted" }, `This deletes the game files in ${lg.install?.path}. Saves and settings stored in your user folder are not touched. You can install again at any time.`),
+      h("p", { class: "muted" }, `This deletes the game files in ${lg.install?.path}. Only files the game was installed with are removed; anything else in that folder stays. You can install again at any time.`),
+      where
+        ? h(
+            "div",
+            { class: "saves-box" },
+            h("p", {}, "Your saves and settings are kept separately, in:"),
+            h("code", { class: "path", "data-id": "save-path" }, where),
+            h("label", { class: "confirm-row" }, alsoSaves, h("span", {}, "Also delete saves (this can't be undone)")),
+          )
+        : h("p", { class: "muted small" }, "Saves and settings are stored outside the install folder and are not touched."),
       h(
         "div",
         { class: "modal-actions" },
         btn("cancel", "Keep it", () => close(), { cls: "ghost" }),
-        btn("confirm-uninstall", "Uninstall", async () => { close(); await run(() => api.uninstall(lg.game.id)); }, { cls: "danger" }),
+        btn("confirm-uninstall", "Uninstall", async () => {
+          const deleteSaves = alsoSaves.checked;
+          close();
+          await run(() => api.uninstall(lg.game.id));
+          if (deleteSaves) {
+            try {
+              const gone = await api.deleteGameSaves(lg.game.id);
+              toast(`Saves deleted from ${gone}.`);
+            } catch (e) {
+              toast(errorMessage(e), "error");
+            }
+          }
+        }, { cls: "danger" }),
       ),
     ),
   );
@@ -770,6 +1122,8 @@ function settingsView() {
   par.addEventListener("change", () => save({ parallel_downloads: +par.value }));
   const auto = h("input", { type: "checkbox", "data-id": "auto-update", checked: s.auto_update_launcher }) as HTMLInputElement;
   auto.addEventListener("change", () => save({ auto_update_launcher: auto.checked }));
+  const autoGames = h("input", { type: "checkbox", "data-id": "auto-update-games", checked: s.auto_update_games }) as HTMLInputElement;
+  autoGames.addEventListener("change", () => save({ auto_update_games: autoGames.checked }));
   const hw = h("input", { type: "checkbox", "data-id": "share-hw", checked: s.share_hardware_info }) as HTMLInputElement;
   hw.addEventListener("change", () => save({ share_hardware_info: hw.checked }));
   const crashes = h("input", { type: "checkbox", "data-id": "offer-crash", checked: s.offer_crash_reports }) as HTMLInputElement;
@@ -798,14 +1152,15 @@ function settingsView() {
       "section",
       { class: "card" },
       h("h3", {}, "Launcher"),
-      h("label", { class: "setting" }, h("div", {}, h("strong", {}, "Update the launcher automatically"), h("small", {}, "Checks for a new launcher version when it starts.")), auto),
+      h("label", { class: "setting" }, h("div", {}, h("strong", {}, "Update the launcher automatically"), h("small", {}, "Checks every time the launcher starts and installs a new version. Required updates always install.")), auto),
+      h("label", { class: "setting" }, h("div", {}, h("strong", {}, "Update games automatically"), h("small", {}, "Checks every time the launcher starts and before you play. Updates never touch your saves or settings.")), autoGames),
       h(
         "div",
         { class: "setting" },
         h("div", {}, h("strong", {}, `Zirtola Launcher ${S.info?.version ?? ""}`), h("small", {}, S.info?.dev_mode ? `Development build · API ${S.info.api_base}` : "Release build")),
         btn("check-update", "Check for updates", checkLauncherUpdate, { cls: "ghost", icon: icons.update }),
       ),
-      S.info?.support_url ? h("div", { class: "setting" }, h("div", {}, h("strong", {}, "Help"), h("small", {}, "Support and known issues")), btn("support", "Open support", () => api.openUrl(S.info!.support_url!), { cls: "ghost", icon: icons.external })) : null,
+      S.info?.support_url ? h("div", { class: "setting" }, h("div", {}, h("strong", {}, "Help"), h("small", {}, "Support and known issues")), btn("support", "Open support", () => void openSite(S.info?.support_url, "support page"), { cls: "ghost", icon: icons.external })) : null,
     ),
     h(
       "section",
@@ -1000,6 +1355,13 @@ onJobFinished(async (f) => {
   if (f.ok) {
     const done = { install: `${title} is installed.`, update: `${title} is up to date.`, verify: f.message ?? `${title} verified.`, uninstall: `${title} was uninstalled.` }[f.kind];
     toast(done);
+    if (f.kind === "update") {
+      // Offer the release notes right after an update.
+      await loadLibrary();
+      const lg = S.library.find((g) => g.game.id === f.game_id);
+      if (lg) void whatsNew(lg, { afterUpdate: true });
+      return;
+    }
   } else if (f.paused) {
     toast(f.kind === "verify" ? "Verification cancelled." : `${title} paused. Resume any time.`);
   } else {
@@ -1040,14 +1402,60 @@ async function boot() {
     S.offline = `Can't reach Zirtola right now (${errorMessage(e)}).`;
   }
   S.booted = true;
-  if (S.me) await loadLibrary();
-  else render();
+  await startupUpdateChecks();
   focusFirst();
   if (S.pending.size) schedulePurchasePoll();
   if (S.me) api.pendingCrashes().then((list) => list.forEach(queueCrash)).catch(() => undefined);
   const link = await api.startupDeepLink().catch(() => null);
   if (link) handleDeepLink(link);
-  if (S.settings?.auto_update_launcher) checkLauncherUpdate(false);
+}
+
+// Every start: the launcher's own update and every owned game's update, in
+// parallel, before the library is shown as current. Offline never blocks.
+async function startupUpdateChecks() {
+  S.checkingUpdates = true;
+  render();
+  const res = await runStartupChecks({
+    currentVersion: S.info?.version ?? "0.0.0",
+    minLauncherVersion: S.info?.min_launcher_version ?? null,
+    autoUpdateLauncher: S.settings?.auto_update_launcher ?? true,
+    autoUpdateGames: S.settings?.auto_update_games ?? true,
+    signedIn: Boolean(S.me),
+    checkLauncherUpdate: async () => {
+      const u = await api.checkLauncherUpdate();
+      S.launcherUpdate = u ? { version: u.version, notes: u.notes } : null;
+      return u;
+    },
+    installLauncherUpdate: async () => {
+      S.launcherUpdating = { downloaded: 0, total: null };
+      render();
+      try {
+        await api.installLauncherUpdate(); // restarts the launcher
+      } catch (e) {
+        S.launcherUpdating = null;
+        throw e;
+      }
+    },
+    refreshLibrary: async () => {
+      const lib = await api.library();
+      S.library = [...lib.filter((g) => g.owned), ...lib.filter((g) => !g.owned)];
+      if (!S.selected || !S.library.some((g) => g.game.id === S.selected)) S.selected = S.library[0]?.game.id ?? null;
+      settlePurchases();
+      return lib.map((g) => ({ id: g.game.id, owned: g.owned, updateAvailable: Boolean(g.install?.update_available), busy: Boolean(g.job) }));
+    },
+    startGameUpdate: (id) => api.update(id),
+  });
+  S.checkingUpdates = false;
+  if (!res.note) S.lastUpdateCheck = res.checkedAt;
+  S.updateNote = res.note;
+  if (res.launcherUpdateRequired && !res.launcherInstalling) {
+    toast(`This launcher version is no longer supported. Update to ${S.launcherUpdate?.version ?? "the latest version"} to keep playing online.`, "error");
+  }
+  if (res.autoUpdating.length) {
+    const names = res.autoUpdating.map((id) => S.library.find((g) => g.game.id === id)?.game.title ?? id);
+    toast(`Updating ${names.join(", ")}.`);
+  }
+  render();
 }
 
 // Keep ownership and update status fresh: when the window regains focus (at

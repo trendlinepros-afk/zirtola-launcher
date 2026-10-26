@@ -2356,6 +2356,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "serde_json",
  "tokio",
  "zirtola-core",
 ]

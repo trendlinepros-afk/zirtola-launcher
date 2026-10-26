@@ -41,8 +41,11 @@ pub struct Settings {
     pub library_dir: PathBuf,
     /// Concurrent chunk downloads.
     pub parallel_downloads: usize,
-    /// Check for a launcher update at start-up.
+    /// Install launcher updates found at start-up (a required update, below the
+    /// website's min_launcher_version, installs regardless).
     pub auto_update_launcher: bool,
+    /// Start game updates found at start-up and before Play.
+    pub auto_update_games: bool,
     /// Send the hardware summary (see hardware.rs) to the website.
     pub share_hardware_info: bool,
     /// Ask to send a crash report when a game crashes.
@@ -56,6 +59,7 @@ impl Default for Settings {
             library_dir: PathBuf::from(format!("{drive}\\Zirtola Games")),
             parallel_downloads: 8,
             auto_update_launcher: true,
+            auto_update_games: true,
             share_hardware_info: true,
             offer_crash_reports: true,
         }
@@ -102,6 +106,8 @@ pub struct AppState {
 pub struct CmdError {
     pub code: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
 }
 
 impl CmdError {
@@ -109,6 +115,7 @@ impl CmdError {
         CmdError {
             code: code.into(),
             message: message.into(),
+            details: None,
         }
     }
 }
@@ -124,7 +131,14 @@ impl From<anyhow::Error> for CmdError {
 
 impl From<ApiError> for CmdError {
     fn from(e: ApiError) -> Self {
-        CmdError::new(e.code(), e.to_string())
+        let details = match &e {
+            ApiError::Api { details, .. } => details.clone(),
+            _ => None,
+        };
+        CmdError {
+            details,
+            ..CmdError::new(e.code(), e.to_string())
+        }
     }
 }
 
@@ -287,9 +301,14 @@ impl AppState {
         Ok(me)
     }
 
-    /// Random per-install device id (created on first use). Not derived from
-    /// hardware, so it identifies this launcher install and nothing else.
+    /// Device id for licence activations: a salted hash of stable hardware ids
+    /// (the motherboard's SMBIOS UUID, else Windows' MachineGuid), so it stays
+    /// the same when the launcher is reinstalled or Windows updates. The raw
+    /// ids never leave the PC. Falls back to a random id saved on disk.
     pub fn device_id(&self) -> String {
+        if let Some(id) = crate::hardware::stable_device_id() {
+            return id;
+        }
         let path = self.data_dir.join("device-id");
         if let Ok(id) = std::fs::read_to_string(&path) {
             let id = id.trim().to_string();

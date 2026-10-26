@@ -134,8 +134,19 @@ try {
   ok(again.status === 409, "a key can only be redeemed once");
 
   // Launch token, checked by the reference game.
-  const lt = await json("/v1/launch-tokens", { method: "POST", ...H(fresh.access_token), body: JSON.stringify({ game_id: "alaskan-bush-simulator" }) });
+  const pcA = "e2e-pc-a-0000000000000000";
+  const pcB = "e2e-pc-b-0000000000000000";
+  const noDevice = await json("/v1/launch-tokens", { method: "POST", ...H(fresh.access_token), body: JSON.stringify({ game_id: "alaskan-bush-simulator" }) });
+  ok(noDevice.status === 400, "launch token needs a device id");
+  const lt = await json("/v1/launch-tokens", { method: "POST", ...H(fresh.access_token), body: JSON.stringify({ game_id: "alaskan-bush-simulator", device_id: pcA, device_name: "PC A" }) });
   ok(lt.status === 200 && lt.body.token.split(".").length === 3, "launch token issued");
+  const second = await json("/v1/launch-tokens", { method: "POST", ...H(fresh.access_token), body: JSON.stringify({ game_id: "alaskan-bush-simulator", device_id: pcB, device_name: "PC B" }) });
+  ok(second.status === 409 && second.body.error === "device_conflict" && second.body.active_devices[0].name === "PC A", "second PC is blocked while the first is active");
+  const deact = await json("/v1/activations/deactivate", { method: "POST", ...H(fresh.access_token), body: JSON.stringify({ activation_id: second.body.active_devices[0].id }) });
+  const third = await json("/v1/launch-tokens", { method: "POST", ...H(fresh.access_token), body: JSON.stringify({ game_id: "alaskan-bush-simulator", device_id: pcB, device_name: "PC B" }) });
+  ok(deact.status === 200 && third.status === 200, "after deactivating PC A, PC B can play");
+  const cl = await json("/v1/games/dirt-simulator/changelog");
+  ok(cl.status === 200 && Array.isArray(cl.body.entries) && cl.body.entries.length >= 1, "changelog lists releases");
   const v = await json("/v1/launch-tokens/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: lt.body.token }) });
   ok(v.body.valid === true && v.body.claims.game === "alaskan-bush-simulator", "online launch-token verification");
   const exe = join(ROOT, "target", "release", process.platform === "win32" ? "license-check.exe" : "license-check");

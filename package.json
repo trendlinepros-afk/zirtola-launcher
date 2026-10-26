@@ -14,13 +14,15 @@
     "mock": "node mock-server/server.mjs",
     "mock:seed": "node mock-server/seed.mjs",
     "e2e": "node scripts/e2e.mjs",
-    "check-secrets": "node scripts/check-secrets.mjs"
+    "check-secrets": "node scripts/check-secrets.mjs",
+    "test:ui": "node --import tsx --test ui/src/links.test.ts ui/src/startup.test.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.6.0",
     "vite": "^6.0.0"
   }

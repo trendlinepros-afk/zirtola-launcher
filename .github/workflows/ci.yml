@@ -32,6 +32,9 @@ jobs:
       - name: UI typecheck and build
         run: npm run build:ui
 
+      - name: UI link tests
+        run: npm run test:ui
+
       - name: Rust tests (manifests, tokens, install engine)
         run: cargo test --workspace --locked
 

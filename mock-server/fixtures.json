@@ -3,14 +3,36 @@
     {
       "id": "dirt-simulator",
       "title": "Dirt Digger",
-      "tagline": "Gold placer mining, one bucket at a time.",
-      "description": "Run a placer gold claim with real machines. Every excavator and dozer is a physics-driven hydraulic machine, every bucket of pay dirt is real volume, and the gold only shows up in the sluice if you dug in the right place.",
-      "status": "early_access",
-      "platforms": ["win64"],
-      "art": { "accent": "#e3a33b" },
-      "price": { "amount": 2499, "currency": "usd" },
+      "tagline": "Real dirt. Real gold.",
+      "description": "A placer gold mining simulator built on real dirt physics.\n\nStake a claim in wild northern placer country and mine it the way it's really done. Every bucket is real soil: topsoil, clay, gravel and sand that cut, spill, slump and pack down the way they do on a real job, with every cubic metre accounted for.\n\nStrip the overburden with a dozer, dig down to the gravel with a hydraulic excavator, haul it in a dump truck and feed the wash plant with a wheel loader. Water runs through the valley: wet ground turns to mud, and a river you dig in runs muddy downstream. Read the ground, because the gold is where the geology put it.",
+      "status": "in_development",
+      "platforms": [
+        "win64"
+      ],
+      "art": {
+        "accent": "#e3a33b"
+      },
+      "price": {
+        "amount": 2499,
+        "currency": "usd"
+      },
       "exe": "DirtDigger.exe",
-      "folder": "DirtDigger"
+      "folder": "DirtDigger",
+      "features": [
+        "Physics-driven hydraulic machines: excavator, wheel loader, dozer, dump truck",
+        "Layered soil that is dug, carried and dumped, with volume conserved",
+        "Rivers and creeks that flow, flood your pit and carry silt",
+        "A 5-mile claim of boreal valley, built from real placer geology",
+        "Gamepad first, keyboard supported"
+      ],
+      "early_access": true,
+      "bug_report_url": "http://localhost:3000/community/bugs?game=dirt-simulator",
+      "requirements": {
+        "url": "http://localhost:3000/games/dirt-digger#system-requirements",
+        "minimum_target": "1080p · Low · 30 fps",
+        "minimum_summary": "Ryzen 5 3600 / Core i5-10400 · 16 GB RAM · RTX 2060 / RX 6600 · SSD"
+      },
+      "save_location": "%LOCALAPPDATA%\\GranitePit\\Saved"
     },
     {
       "id": "alaskan-bush-simulator",
@@ -18,9 +40,16 @@
       "tagline": "Alaskan backcountry flying and bushcraft.",
       "description": "Fly a taildragger into the Alaskan bush: land on gravel bars and ridgelines, haul supplies to remote camps, and keep yourself alive when the weather closes in and you are a long way from the strip.",
       "status": "in_development",
-      "platforms": ["win64"],
-      "art": { "accent": "#4fa3c7" },
-      "price": { "amount": 1999, "currency": "usd" },
+      "platforms": [
+        "win64"
+      ],
+      "art": {
+        "accent": "#4fa3c7"
+      },
+      "price": {
+        "amount": 1999,
+        "currency": "usd"
+      },
       "exe": "AlaskanBushSimulator.exe",
       "folder": "AlaskanBushSimulator"
     }
@@ -31,7 +60,13 @@
       "display_name": "Demo Miner",
       "login": "miner",
       "note": "Owns Dirt Digger (purchase)",
-      "entitlements": [{ "game_id": "dirt-simulator", "kind": "purchase", "granted_at": "2026-09-01T12:00:00Z" }]
+      "entitlements": [
+        {
+          "game_id": "dirt-simulator",
+          "kind": "purchase",
+          "granted_at": "2026-09-01T12:00:00Z"
+        }
+      ]
     },
     {
       "id": "acct_pilot",
@@ -39,8 +74,16 @@
       "login": "pilot",
       "note": "Owns both (purchase + studio grant)",
       "entitlements": [
-        { "game_id": "alaskan-bush-simulator", "kind": "purchase", "granted_at": "2026-09-10T12:00:00Z" },
-        { "game_id": "dirt-simulator", "kind": "grant", "granted_at": "2026-09-12T12:00:00Z" }
+        {
+          "game_id": "alaskan-bush-simulator",
+          "kind": "purchase",
+          "granted_at": "2026-09-10T12:00:00Z"
+        },
+        {
+          "game_id": "dirt-simulator",
+          "kind": "grant",
+          "granted_at": "2026-09-12T12:00:00Z"
+        }
       ]
     },
     {
@@ -52,8 +95,17 @@
     }
   ],
   "keys": [
-    { "key": "DIRT-DIGG-ER00-0001", "game_id": "dirt-simulator" },
-    { "key": "DIRT-DIGG-ER00-0002", "game_id": "dirt-simulator" },
-    { "key": "ALAS-KABU-SH00-0001", "game_id": "alaskan-bush-simulator" }
+    {
+      "key": "DIRT-DIGG-ER00-0001",
+      "game_id": "dirt-simulator"
+    },
+    {
+      "key": "DIRT-DIGG-ER00-0002",
+      "game_id": "dirt-simulator"
+    },
+    {
+      "key": "ALAS-KABU-SH00-0001",
+      "game_id": "alaskan-bush-simulator"
+    }
   ]
 }

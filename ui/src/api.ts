@@ -21,6 +21,18 @@ export interface CatalogGame {
   art: { accent: string; cover_url?: string | null };
   /** Price in minor units (cents) if the website sells it; absent = not for sale / not set. */
   price?: { amount: number; currency: string } | null;
+  /** false = shown with a price but not on sale yet ("Coming soon"). */
+  sales_open?: boolean | null;
+  /** Website checkout page for this game, when it sells it directly. */
+  checkout_url?: string | null;
+  /** Still in early access: show "Report a bug". */
+  early_access?: boolean | null;
+  /** The game's bug-report forum on the website. */
+  bug_report_url?: string | null;
+  /** The website's system requirements section, with a one-line minimum. */
+  requirements?: { url: string; minimum_target?: string | null; minimum_summary?: string | null } | null;
+  /** Where the game keeps saves and settings, e.g. %LOCALAPPDATA%\GranitePit\Saved (never in the install folder). */
+  save_location?: string | null;
 }
 
 export type JobKind = "install" | "update" | "verify" | "uninstall";
@@ -34,7 +46,37 @@ export interface InstallInfo {
   folder_missing: boolean;
 }
 
+export interface ChangelogEntry {
+  version: string;
+  channel: string;
+  released_at: string;
+  notes: string;
+  current: boolean;
+}
+
+export interface ActiveDevice {
+  id: string;
+  name: string;
+  activated_at: string;
+  last_seen_at: string;
+}
+
+export interface LicenseInfo {
+  game_id: string;
+  game_title: string;
+  source: "purchase" | "key" | "grant" | "early_access";
+  granted_at: string;
+  order_number: string | null;
+  key: string | null;
+  key_masked: string | null;
+  activations: { id: string; name: string; activated_at: string; last_seen_at: string; this_device: boolean }[];
+}
+
 export interface LibraryGame {
+  /** Channels the licence allows: "live" (stable) and maybe "beta". */
+  branches: string[];
+  /** Channel this install follows. */
+  branch: string;
   game: CatalogGame;
   owned: boolean;
   entitlement: string | null;
@@ -49,12 +91,15 @@ export interface AppInfo {
   store_url: string | null;
   account_url: string | null;
   support_url: string | null;
+  /** Oldest launcher the website supports; below it the update is required. */
+  min_launcher_version?: string | null;
 }
 
 export interface Settings {
   library_dir: string;
   parallel_downloads: number;
   auto_update_launcher: boolean;
+  auto_update_games: boolean;
   share_hardware_info: boolean;
   offer_crash_reports: boolean;
 }
@@ -84,6 +129,7 @@ export interface JobFinished {
 export interface CmdError {
   code: string;
   message: string;
+  details?: { active_devices?: ActiveDevice[]; [k: string]: unknown };
 }
 
 export function errorMessage(e: unknown): string {
@@ -113,9 +159,15 @@ export const api = {
   update: (gameId: string) => invoke<void>("update_game", { gameId }),
   verify: (gameId: string) => invoke<void>("verify_game", { gameId }),
   uninstall: (gameId: string) => invoke<void>("uninstall_game", { gameId }),
+  deleteGameSaves: (gameId: string) => invoke<string>("delete_game_saves", { gameId }),
+  resolveSaveLocation: (raw: string) => invoke<string>("resolve_save_location", { raw }),
   pause: (gameId: string) => invoke<void>("pause_job", { gameId }),
   forget: (gameId: string) => invoke<void>("forget_install", { gameId }),
   launch: (gameId: string, title?: string) => invoke<void>("launch_game", { gameId, title: title ?? null }),
+  deactivateDevice: (activationId: string) => invoke<void>("deactivate_device", { activationId }),
+  changelog: (gameId: string) => invoke<{ game_id: string; entries: ChangelogEntry[] }>("game_changelog", { gameId }),
+  setBranch: (gameId: string, branch: "live" | "beta") => invoke<void>("set_branch", { gameId, branch }),
+  license: (gameId: string) => invoke<LicenseInfo>("game_license", { gameId }),
   hardwareReport: () => invoke<Record<string, unknown>>("hardware_report"),
   pendingCrashes: () => invoke<CrashCandidate[]>("pending_crashes"),
   sendCrashReport: (id: string, comment: string) => invoke<string>("send_crash_report", { id, comment }),

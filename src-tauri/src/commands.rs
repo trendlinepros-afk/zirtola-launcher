@@ -19,6 +19,8 @@ pub struct AppInfo {
     store_url: Option<String>,
     account_url: Option<String>,
     support_url: Option<String>,
+    /// Oldest launcher the website still supports; below it the update is required.
+    min_launcher_version: Option<String>,
 }
 
 #[tauri::command]
@@ -31,6 +33,7 @@ pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> CmdResult<A
         store_url: cfg.as_ref().map(|c| c.store_url.clone()),
         account_url: cfg.as_ref().and_then(|c| c.account_url.clone()),
         support_url: cfg.as_ref().and_then(|c| c.support_url.clone()),
+        min_launcher_version: cfg.as_ref().and_then(|c| c.min_launcher_version.clone()),
     })
 }
 
@@ -119,6 +122,10 @@ pub struct LibraryGame {
     game: CatalogGame,
     owned: bool,
     entitlement: Option<String>,
+    /// Channels the licence allows ("live" = stable, "beta").
+    branches: Vec<String>,
+    /// Channel this install follows.
+    branch: String,
     install: Option<InstallInfo>,
     job: Option<JobKind>,
 }
@@ -165,6 +172,11 @@ pub async fn library(state: State<'_, AppState>) -> CmdResult<Vec<LibraryGame>> 
         out.push(LibraryGame {
             owned: ent.is_some(),
             entitlement: ent.map(|e| e.kind.clone()),
+            branches: ent.map(|e| e.branches.clone()).unwrap_or_default(),
+            branch: registry
+                .get(&g.id)
+                .map(|r| r.branch.clone())
+                .unwrap_or_else(|| "live".into()),
             job: state.job_running(&g.id),
             game: g,
             install,
@@ -381,6 +393,39 @@ pub async fn uninstall_game(
     Ok(())
 }
 
+/// "Also delete saves?" after uninstalling. Saves never live in the install
+/// folder: the catalogue names the folder (e.g. %LOCALAPPDATA%\GranitePit\Saved)
+/// and this deletes it only after the player ticked the box, and only if it
+/// resolves inside the player's own profile folders.
+#[tauri::command]
+pub async fn delete_game_saves(state: State<'_, AppState>, game_id: String) -> CmdResult<String> {
+    if !valid_game_id(&game_id) {
+        return Err(CmdError::new("bad_game", "Unknown game."));
+    }
+    let catalog = state.api.catalog().await?;
+    let game = catalog
+        .games
+        .into_iter()
+        .find(|g| g.id == game_id)
+        .ok_or_else(|| CmdError::new("bad_game", "Unknown game."))?;
+    let raw = game
+        .save_location
+        .ok_or_else(|| CmdError::new("no_saves", "This game doesn't say where it keeps its saves."))?;
+    let dir = crate::saves::resolve_save_dir(&raw).map_err(|e| CmdError::new("bad_save_dir", e))?;
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).map_err(|e| CmdError::new("delete_failed", format!("Couldn't delete {}: {e}", dir.display())))?;
+    }
+    Ok(dir.display().to_string())
+}
+
+/// Where a game keeps its saves on this PC (for the uninstall dialog).
+#[tauri::command]
+pub fn resolve_save_location(raw: String) -> CmdResult<String> {
+    crate::saves::resolve_save_dir(&raw)
+        .map(|p| p.display().to_string())
+        .map_err(|e| CmdError::new("bad_save_dir", e))
+}
+
 /// Pause (cancel) the running job. Installs and updates resume from where they stopped.
 #[tauri::command]
 pub fn pause_job(state: State<'_, AppState>, game_id: String) -> CmdResult<()> {
@@ -440,6 +485,75 @@ pub async fn launch_game(
     Ok(())
 }
 
+// ---------------------------------------------------------------- devices, channels, changelog
+
+/// Deactivate another PC so this one can play (the player confirmed in the UI).
+#[tauri::command]
+pub async fn deactivate_device(state: State<'_, AppState>, activation_id: String) -> CmdResult<()> {
+    if activation_id.is_empty() || activation_id.len() > 64 {
+        return Err(CmdError::new("bad_request", "Unknown device."));
+    }
+    state
+        .authed(|at| {
+            let api = state.api.clone();
+            let id = activation_id.clone();
+            async move { api.deactivate_device(&at, &id).await }
+        })
+        .await
+}
+
+/// "View license key": fetched live for the signed-in account; never stored.
+#[tauri::command]
+pub async fn game_license(state: State<'_, AppState>, game_id: String) -> CmdResult<serde_json::Value> {
+    if !valid_game_id(&game_id) {
+        return Err(CmdError::new("bad_game", "Unknown game."));
+    }
+    let device = state.device_id();
+    state
+        .authed(|at| {
+            let api = state.api.clone();
+            let (gid, dev) = (game_id.clone(), device.clone());
+            async move { api.license(&at, &gid, &dev).await }
+        })
+        .await
+}
+
+/// Release notes for a game on its channel, newest first.
+#[tauri::command]
+pub async fn game_changelog(state: State<'_, AppState>, game_id: String) -> CmdResult<serde_json::Value> {
+    if !valid_game_id(&game_id) {
+        return Err(CmdError::new("bad_game", "Unknown game."));
+    }
+    let branch = state
+        .registry
+        .lock()
+        .await
+        .get(&game_id)
+        .map(|r| r.branch.clone())
+        .unwrap_or_else(|| "live".into());
+    Ok(state.api.changelog(&game_id, &branch).await?)
+}
+
+/// Switch a game between the stable ("live") and "beta" channels. The next
+/// library refresh offers that channel's build as an update.
+#[tauri::command]
+pub async fn set_branch(state: State<'_, AppState>, game_id: String, branch: String) -> CmdResult<()> {
+    if branch != "live" && branch != "beta" {
+        return Err(CmdError::new("bad_request", "Unknown channel."));
+    }
+    if state.job_running(&game_id).is_some() {
+        return Err(CmdError::new("busy", "Wait for the current task to finish."));
+    }
+    let mut reg = state.registry.lock().await;
+    let Some(mut rec) = reg.get(&game_id).cloned() else {
+        return Err(CmdError::new("not_installed", "Install the game first."));
+    };
+    rec.branch = branch;
+    reg.put(rec);
+    reg.save()?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------- hardware & crash reports
 
 /// Exactly what "Share hardware info" sends (shown in Settings).
@@ -472,8 +586,12 @@ pub fn open_url(url: String) -> CmdResult<()> {
         return Err(CmdError::new("bad_url", "Only web links can be opened."));
     }
     if dev_mode() && std::env::var_os("ZIRTOLA_NO_BROWSER").is_some() {
+        // Automated tests read the URL from the log; a person sees why nothing opened.
         eprintln!("ZIRTOLA_OPEN_URL={u}");
-        return Ok(());
+        return Err(CmdError::new(
+            "browser_suppressed",
+            format!("Test mode: the browser is switched off (ZIRTOLA_NO_BROWSER). Would open {u}"),
+        ));
     }
     open::that_detached(u.as_str())?;
     Ok(())

@@ -26,7 +26,8 @@ checks a running website (local or staging).
 | --- | --- |
 | 400 | `bad_request`, `invalid_grant`, `unsupported_grant_type`, `invalid_manifest` |
 | 401 | `unauthorized` (access token missing/expired: refresh and retry once), `invalid_client` |
-| 403 | `not_entitled`, `activation_limit` |
+| 403 | `not_entitled` |
+| 409 | `device_conflict` (another PC holds the licence; see launch tokens) |
 | 404 | `not_found`, `no_build`, `invalid_key` |
 | 409 | `key_already_redeemed`, `already_owned` |
 | 410 | `key_expired` |
@@ -76,18 +77,36 @@ Games the launcher lists (published and visible in the launcher).
 ```json
 { "games": [ {
   "id": "dirt-simulator",
-  "title": "Dirt Simulator",
-  "tagline": "Heavy machines, soft ground.",
+  "title": "Dirt Digger",
+  "tagline": "Real dirt. Real gold.",
   "description": "…",
   "status": "early_access",            // released | early_access | in_development | on_hold | coming_soon
-  "store_url": "https://zirtola.com/games/dirt-simulator",
+  "store_url": "https://zirtola.com/games/dirt-digger",
   "platforms": ["win64"],
   "latest_version": "1.0.1",           // live build on win64/live, or null
   "install_size": 389210112,           // bytes, or null
   "art": { "accent": "#FFCD00", "cover_url": "https://…/key-art.jpg" },
-  "price": { "amount": 2499, "currency": "usd" }   // optional, minor units; shown on "Buy on the website"
+  "price": { "amount": 1999, "currency": "usd" },  // optional, minor units; shown on "Buy on the website"
+  "sales_open": false,                 // false: disabled "Buy" with "Coming soon"
+  "checkout_url": "https://zirtola.com/checkout/dirt-simulator",
+  "features": ["…"],
+  "early_access": true,                // shows "Report a bug" on the game page
+  "bug_report_url": "https://zirtola.com/community/bugs?game=dirt-simulator",
+  "requirements": {                    // optional: "System requirements" link + minimum line
+    "url": "https://zirtola.com/games/dirt-digger#system-requirements",
+    "minimum_target": "1080p · Low · 30 fps",
+    "minimum_summary": "Ryzen 5 3600 / Core i5-10400 · 16 GB RAM · RTX 2060 / RX 6600 · SSD"
+  }
 } ] }
 ```
+
+`save_location` (e.g. `%LOCALAPPDATA%\GranitePit\Saved`) is where the game keeps saves
+and settings; the launcher shows it in the uninstall dialog and deletes it only if
+the player ticks "Also delete saves" (it must resolve under `%LOCALAPPDATA%`,
+`%APPDATA%` or `%USERPROFILE%`, at least two folders deep).
+
+`early_access`, `bug_report_url`, `requirements` and `save_location` come from the website's
+`src/content/game-specs.ts` (per game, in the repo, not the database).
 
 **Buying from the launcher.** A locked game's button reads "Buy on the website · $24.99"
 (price when provided) and opens `store_url`. The launcher remembers the game as a
@@ -238,17 +257,43 @@ template and resumes. Servers should support `Range` (the mock does).
 ### `POST {base}/v1/launch-tokens`
 
 ```json
-{ "game_id": "dirt-simulator", "device_id": "<random install id, 16-128 base64url chars>", "device_name": "GAMING-PC" }
+{ "game_id": "dirt-simulator", "device_id": "<device id, 16-128 base64url chars>", "device_name": "Windows 11 Pro · NVIDIA GeForce RTX 3070" }
 ```
 
 ```json
 { "token": "<JWT>", "expires_at": "2026-10-25T15:35:00Z" }
 ```
 
-`device_id` is a random id the launcher creates once per install (not a
-hardware fingerprint); the website stores only its hash. Each (account, game,
-device) is an **activation**; a game can cap activations per license
-(`403 activation_limit`), and staff can reset them on the website.
+`device_id` is a salted SHA-256 of stable hardware ids (the SMBIOS system UUID,
+else Windows' MachineGuid), computed on the PC; the raw ids never leave it, and
+the website stores only a hash of the id. It survives reinstalling the
+launcher and Windows updates, so a reinstall never uses up an activation.
+`device_name` is a hardware label (OS + GPU), never the computer or user name.
+
+Each (account, game, device) is an **activation**. A licence is good for one
+device by default (`Game.maxActivations`, set per game in Studio). Launching on
+another PC while one is active answers:
+
+```json
+409 { "error": "device_conflict",
+      "message": "Dirt Digger is active on Windows 10 Home · GTX 1060 (last used Oct 23, 2026). Deactivate it to play here.",
+      "limit": 1,
+      "active_devices": [ { "id": "<activation id>", "name": "…", "activated_at": "…", "last_seen_at": "…" } ] }
+```
+
+The launcher shows that message with a "Deactivate and play here" button (the
+player confirms), which calls:
+
+### `POST {base}/v1/activations/deactivate`
+
+`{ "activation_id": "…" }` → `{ "ok": true }`. Frees the slot at once.
+Rate-limited per licence (`LAUNCHER_DEACTIVATIONS_PER_PERIOD`, default 3 per
+`LAUNCHER_DEACTIVATION_PERIOD_DAYS`, default 30): over the limit answers
+`429 deactivation_limit` with a message pointing to support. Players can also
+deactivate from Settings → My games & keys on the website; staff from Studio →
+Licensing (not rate-limited). Every activation, block and deactivation is logged.
+
+`GET {base}/v1/activations[?game_id=]` lists the account's active devices.
 
 The token is a compact JWS, header `{"alg":"EdDSA","typ":"JWT","kid":"…"}`,
 signed with the `launch` key:
@@ -256,15 +301,29 @@ signed with the `launch` key:
 ```json
 { "iss": "https://zirtola.com", "sub": "<account id>", "aud": "zirtola-game:dirt-simulator",
   "game": "dirt-simulator", "ent": "purchase", "iat": 1761406200, "exp": 1761406500,
-  "jti": "…", "name": "Miner49" }
+  "jti": "…", "name": "Miner49", "addons": [], "dev": "<device hash>", "grace": 604800 }
 ```
 
 The launcher passes it to the game in the environment (see GAME_INTEGRATION.md).
 
 ### `POST {base}/v1/launch-tokens/verify` (public)
 
-For games that prefer an online check: `{ "token": "…" }` →
-`{ "valid": true, "claims": { … } }` or `{ "valid": false, "claims": null }`.
+The game's online check: `{ "token": "…" }` → `{ "valid": true, "claims": { … } }`
+or `{ "valid": false, "reason": "…", "claims": null }`. A token stays checkable
+past its 5-minute `exp` for its offline grace period (`grace` seconds after
+`iat`, from `LAUNCHER_OFFLINE_GRACE_DAYS`, default 7). Reasons:
+`licence_revoked` (refunded / revoked), `device_deactivated` (this PC was
+deactivated: the game should stop and ask the player to start it from the
+launcher), `grace_expired`, `issued_in_future` (clock more than 2 minutes off).
+Offline, games verify the signature themselves and accept the token until
+`iat + grace` (`zirtola_core::token::verify_license`, see GAME_INTEGRATION.md).
+
+### `GET {base}/v1/games/{id}/changelog?branch=live|beta` (public)
+
+Release notes per version, newest first: `{ "game_id", "entries": [ { "version",
+"channel": "stable"|"beta", "released_at", "notes": "<markdown>", "current" } ] }`.
+`beta` includes stable releases. The launcher shows these under "What's new"
+(and right after an update); the website shows the stable ones on the game page.
 
 ### `POST {base}/v1/hardware`
 
@@ -273,7 +332,7 @@ Sent on sign-in and when the hardware changes, only if the player leaves
 
 ```json
 {
-  "device_id": "<random install id>",
+  "device_id": "<device id>",
   "os": { "name": "Windows 11 Pro", "version": "24H2", "build": "26100.2314" },
   "cpu": { "model": "AMD Ryzen 7 7800X3D 8-Core Processor", "cores": 8, "threads": 16 },
   "ram_mb": 32768,

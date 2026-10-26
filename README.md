@@ -173,6 +173,13 @@ Signing** (~$9.99/month) if the studio is eligible (US/Canada individuals, or
 companies in the US, Canada, EU, UK); otherwise an OV certificate with cloud
 signing (~$150–400/year). EV no longer skips SmartScreen (since March 2024).
 
+## Distribution without a certificate yet
+
+See **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)**: which channels are
+legitimate before we have a code-signing certificate (website + winget now,
+signing as soon as possible), and why the Microsoft Store, a zip or a
+bootstrapper do not work for this launcher.
+
 ## Releasing
 
 See **[docs/RELEASING.md](docs/RELEASING.md)**: push a `vX.Y.Z` tag, GitHub

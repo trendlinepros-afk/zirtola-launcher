@@ -15,7 +15,7 @@
     "mock:seed": "node mock-server/seed.mjs",
     "e2e": "node scripts/e2e.mjs",
     "check-secrets": "node scripts/check-secrets.mjs",
-    "test:ui": "node --import tsx --test ui/src/links.test.ts"
+    "test:ui": "node --import tsx --test ui/src/links.test.ts ui/src/startup.test.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0"

@@ -6,6 +6,7 @@ mod crash;
 mod hardware;
 mod jobs;
 mod reports;
+mod saves;
 mod state;
 
 use tauri::{Emitter, Manager};
@@ -84,6 +85,8 @@ pub fn run() {
             commands::deactivate_device,
             commands::game_changelog,
             commands::game_license,
+            commands::delete_game_saves,
+            commands::resolve_save_location,
             commands::set_branch,
             commands::hardware_report,
             commands::pending_crashes,

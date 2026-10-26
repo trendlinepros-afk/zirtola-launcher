@@ -17,6 +17,17 @@
   `bug_report_url`).
 - Device dialogs say plainly that a licence moves between your PCs, with a
   **Learn more** link to the website's FAQ.
+- Every start checks for a launcher update and for game updates (entitlements and
+  each owned game's latest manifest) in parallel before the library shows as
+  current. Launcher updates install and restart when allowed, and always when the
+  version is below the website's `min_launcher_version`. Game updates show
+  "Update available · What's new" and start by themselves when **Update games
+  automatically** is on (new setting). Play re-checks if the last check is over
+  10 minutes old. Offline, a small "Couldn't check for updates" note; play is
+  never blocked.
+- Updates, verify, repair and uninstall only ever touch files the manifest lists
+  inside the install folder, and never follow a link or junction out of it.
+  Uninstall asks "Also delete saves?" (unticked) and shows where the saves are.
 - Releases publish `installer.json` and `SHA256SUMS.txt` (the setup file's
   SHA-256) for the website's download page.
 - The Store button never fails silently: it falls back to the site's games page and

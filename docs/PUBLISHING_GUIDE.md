@@ -80,9 +80,15 @@ after payment and in the receipt). After your first signed release:
 6. **Developers → Webhooks → Add endpoint**:
    - URL: `https://zirtola.com/api/webhooks/stripe`
    - Events: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
-     `checkout.session.async_payment_failed`, `checkout.session.expired`, `charge.refunded`
+     `checkout.session.async_payment_failed`, `checkout.session.expired`, `charge.refunded`,
+     `charge.dispute.created`, `charge.dispute.closed`
    - After saving, **Reveal** the **Signing secret** (`whsec_...`). Secret.
-   If you already set this up for donations, just add `charge.refunded` if it's missing: the same endpoint handles games.
+   If you already set this up for donations, add the ones that are missing (at least
+   `charge.refunded` and the two `charge.dispute` events): the same endpoint handles games.
+   What they do: a refund or an opened chargeback takes the game away (licence, order
+   key and device activations); a won chargeback gives it back. Bank payments that
+   settle later unlock the game only when the money arrives. An order whose paid
+   amount doesn't match is flagged in **Studio → Licensing → Sales** and not unlocked.
 
 ### 3. Cloudflare R2 (where the game files are downloaded from)
 
@@ -127,9 +133,16 @@ update before you can ship game builds.
 
 ### 5. Railway (the website)
 
-1. Merge the website pull requests (licensing, then sales) into the branch Railway
-   deploys from. Railway redeploys and applies the database changes by itself
-   (they only add tables and columns).
+1. The licensing pull request (website #21) and the Dirt Digger store copy
+   (#23) are already live. Merge **website PR #22** (checkout, one device per
+   licence, licence keys, install guide, system requirements):
+   <https://github.com/trendlinepros-afk/retail-store/pull/22>. It targets
+   `claude/app-marketplace-platform-cpyvmr`, the branch Railway deploys from, so
+   Railway redeploys and applies migration `0016_game_sales` by itself (it only
+   adds tables and columns and changes no existing rows).
+   Then merge **launcher PR #1** into `main`:
+   <https://github.com/trendlinepros-afk/zirtola-launcher/pull/1>. Nothing is
+   released until you push a version tag (Part 2).
 2. Railway → your project → the website service → **Variables** → **New Variable**,
    one by one. The values for the launcher ones are in
    `C:\Users\Wicked\.zirtola-launcher-secrets\RAILWAY_VARIABLES.txt`.
@@ -175,11 +188,13 @@ Wording for buying, devices and early access is in
 `src/lib/launcher/install-guide.ts`.
 
 1. Sign in to zirtola.com as admin → **Studio → Games → Dirt Digger**: check the
-   title (Dirt Digger), tagline, description, feature list, screenshots and cover.
-   Website updates never change these on the live site; they are edited here.
+   title (Dirt Digger), tagline, short description, description, feature list,
+   add-on note, screenshots and cover. They were set by the website's store-copy
+   update (#23); from now on edit them here. The game page is at
+   zirtola.com/games/dirt-digger (the old /games/dirt-simulator address redirects).
 2. **Studio → Licensing → Launcher catalogue → Dirt Digger → Manage**:
-   - **Price**: `19.99`, currency `USD`.
-   - **Devices per license**: `1` (games created before this update keep their old limit until you change it here).
+   - **Price**: `19.99`, currency `USD` (already set by #23).
+   - **Devices per license**: `1` (already set by #23; check it says 1).
    - **Sales open**: leave **off** until launch day. Players see the Purchase
      button greyed out with "Coming soon".
    - **Show this game in the Zirtola Launcher**: on.
@@ -300,7 +315,7 @@ On the day:
 
 - [ ] **Studio → Licensing → Launcher catalogue → Dirt Digger → Sales open** on → **Save**.
 - [ ] Buy it yourself once with a real card and refund it (proves live payments end to end).
-- [ ] Post the announcement with the link `https://zirtola.com/games/dirt-simulator`.
+- [ ] Post the announcement with the link `https://zirtola.com/games/dirt-digger`.
 - [ ] Keep **Studio → Licensing → Sales** and **Studio → Crash reports** open for the day.
 
 Afterwards: payouts arrive per Stripe's schedule (usually 2 to 7 days); Stripe's

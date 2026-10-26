@@ -81,7 +81,7 @@ Games the launcher lists (published and visible in the launcher).
   "tagline": "Real dirt. Real gold.",
   "description": "…",
   "status": "early_access",            // released | early_access | in_development | on_hold | coming_soon
-  "store_url": "https://zirtola.com/games/dirt-simulator",
+  "store_url": "https://zirtola.com/games/dirt-digger",
   "platforms": ["win64"],
   "latest_version": "1.0.1",           // live build on win64/live, or null
   "install_size": 389210112,           // bytes, or null
@@ -93,14 +93,19 @@ Games the launcher lists (published and visible in the launcher).
   "early_access": true,                // shows "Report a bug" on the game page
   "bug_report_url": "https://zirtola.com/community/bugs?game=dirt-simulator",
   "requirements": {                    // optional: "System requirements" link + minimum line
-    "url": "https://zirtola.com/games/dirt-simulator#system-requirements",
+    "url": "https://zirtola.com/games/dirt-digger#system-requirements",
     "minimum_target": "1080p · Low · 30 fps",
     "minimum_summary": "Ryzen 5 3600 / Core i5-10400 · 16 GB RAM · RTX 2060 / RX 6600 · SSD"
   }
 } ] }
 ```
 
-`early_access`, `bug_report_url` and `requirements` come from the website's
+`save_location` (e.g. `%LOCALAPPDATA%\GranitePit\Saved`) is where the game keeps saves
+and settings; the launcher shows it in the uninstall dialog and deletes it only if
+the player ticks "Also delete saves" (it must resolve under `%LOCALAPPDATA%`,
+`%APPDATA%` or `%USERPROFILE%`, at least two folders deep).
+
+`early_access`, `bug_report_url`, `requirements` and `save_location` come from the website's
 `src/content/game-specs.ts` (per game, in the repo, not the database).
 
 **Buying from the launcher.** A locked game's button reads "Buy on the website · $24.99"

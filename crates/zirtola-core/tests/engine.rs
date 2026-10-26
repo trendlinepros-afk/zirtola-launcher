@@ -367,3 +367,124 @@ async fn insufficient_space_is_refused() {
     let r = install::apply(&dir.path().join("G"), &env, &m, o).await;
     assert!(matches!(r, Err(InstallError::InsufficientSpace { .. })));
 }
+
+/// Saves and settings must survive everything the launcher does to a game:
+/// update, verify, repair and uninstall only add, replace or delete files the
+/// manifest lists inside the install folder. Unknown files (a game writing
+/// Saved/SaveGames/x.sav next to itself, a player's own mod) and anything
+/// outside the folder (%LOCALAPPDATA%\GranitePit\Saved) are left byte for byte.
+#[tokio::test]
+async fn player_files_survive_update_verify_repair_and_uninstall() {
+    let server = Arc::new(Server::default());
+    let template = serve(server.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("Dirt Digger");
+    let outside_saves = dir.path().join("LocalAppData/GranitePit/Saved/SaveGames");
+
+    let v1_files = vec![
+        ("GranitePit.exe", bytes(11, 120_000)),
+        ("GranitePit/Content/Paks/pak0.pak", bytes(12, 600_000)),
+        ("GranitePit/Content/Paks/old.pak", bytes(13, 90_000)),
+        ("GranitePit/Binaries/Win64/GranitePit-Win64-Shipping.exe", bytes(14, 200_000)),
+    ];
+    let v1 = make_build(&server, "0.1.0", &v1_files);
+    let (env1, _) = signed(&v1);
+    install::apply(&root, &env1, &v1, opts(&template, CancellationToken::new(), HashSet::new()))
+        .await
+        .unwrap();
+
+    // Files the launcher must never touch.
+    let player_files: Vec<(&str, Vec<u8>)> = vec![
+        ("Saved/SaveGames/x.sav", bytes(90, 33_333)),
+        ("GranitePit/Saved/Config/Windows/GameUserSettings.ini", b"[ScalabilityGroups]\nsg.ResolutionQuality=100\n".to_vec()),
+        ("GranitePit/Content/Paks/~mods/my_mod.pak", bytes(91, 4_096)),
+    ];
+    for (p, data) in &player_files {
+        let f = root.join(p);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(&f, data).unwrap();
+    }
+    std::fs::create_dir_all(&outside_saves).unwrap();
+    let outside_file = outside_saves.join("slot0.sav");
+    std::fs::write(&outside_file, bytes(92, 10_000)).unwrap();
+    let check_player_files = |when: &str| {
+        for (p, data) in &player_files {
+            let got = std::fs::read(root.join(p)).unwrap_or_else(|_| panic!("{p} deleted by {when}"));
+            assert!(got == *data, "{p} changed by {when}");
+        }
+        assert_eq!(std::fs::read(&outside_file).unwrap(), bytes(92, 10_000), "outside save changed by {when}");
+    };
+
+    // Update: one pak changes, old.pak goes away (same folder as the mod).
+    let mut pak = v1_files[1].1.clone();
+    pak[CHUNK * 2..CHUNK * 2 + 64].fill(7);
+    let v2_files = vec![
+        ("GranitePit.exe", v1_files[0].1.clone()),
+        ("GranitePit/Content/Paks/pak0.pak", pak),
+        ("GranitePit/Binaries/Win64/GranitePit-Win64-Shipping.exe", bytes(15, 200_000)),
+    ];
+    let v2 = make_build(&server, "0.1.1", &v2_files);
+    let (env2, _) = signed(&v2);
+    install::apply(&root, &env2, &v2, opts(&template, CancellationToken::new(), HashSet::new()))
+        .await
+        .unwrap();
+    assert_files(&root, &v2_files);
+    assert!(!root.join("GranitePit/Content/Paks/old.pak").exists());
+    check_player_files("update");
+
+    // Verify reports the build as fine (unknown files are not "damage").
+    let report = install::verify(&root, &v2, None, CancellationToken::new()).await.unwrap();
+    assert!(report.is_ok(), "verify flagged: {report:?}");
+    check_player_files("verify");
+
+    // Repair after damage.
+    std::fs::write(root.join("GranitePit.exe"), b"broken").unwrap();
+    let report = install::verify(&root, &v2, None, CancellationToken::new()).await.unwrap();
+    let force: HashSet<String> = report.damaged.iter().chain(report.missing.iter()).cloned().collect();
+    assert_eq!(force.len(), 1);
+    install::apply(&root, &env2, &v2, opts(&template, CancellationToken::new(), force))
+        .await
+        .unwrap();
+    assert_files(&root, &v2_files);
+    check_player_files("repair");
+
+    // Uninstall removes only the build: the folder stays because player files are in it.
+    install::uninstall(&root).unwrap();
+    for (p, _) in &v2_files {
+        assert!(!root.join(p).exists(), "{p} should be uninstalled");
+    }
+    check_player_files("uninstall");
+}
+
+/// A junction inside the install folder that points somewhere else (say, at
+/// the save folder) is never followed: the update refuses instead of writing
+/// or deleting through it.
+#[cfg(windows)]
+#[tokio::test]
+async fn links_inside_the_install_folder_are_not_followed() {
+    let server = Arc::new(Server::default());
+    let template = serve(server.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("Game");
+    let elsewhere = dir.path().join("Elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    std::fs::write(elsewhere.join("save.sav"), b"precious").unwrap();
+    std::fs::create_dir_all(&root).unwrap();
+    let st = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(root.join("Data"))
+        .arg(&elsewhere)
+        .output()
+        .unwrap();
+    assert!(st.status.success(), "mklink /J failed: {}", String::from_utf8_lossy(&st.stderr));
+
+    let files = vec![("Game.exe", bytes(21, 1000)), ("Data/save.sav", bytes(22, 1000))];
+    let m = make_build(&server, "1.0.0", &files);
+    let (env, _) = signed(&m);
+    let r = install::apply(&root, &env, &m, opts(&template, CancellationToken::new(), HashSet::new())).await;
+    let err = format!("{:?}", r.err().expect("must not write through a junction"));
+    assert!(err.contains("refusing to follow a link"), "unexpected error: {err}");
+    assert_eq!(std::fs::read(elsewhere.join("save.sav")).unwrap(), b"precious");
+    install::uninstall(&root).unwrap();
+    assert_eq!(std::fs::read(elsewhere.join("save.sav")).unwrap(), b"precious");
+}

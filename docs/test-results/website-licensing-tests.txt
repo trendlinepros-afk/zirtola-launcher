@@ -2,31 +2,37 @@
 > zirtola@0.1.0 test:licensing
 > node --conditions=react-server --import tsx --test --test-concurrency=1 tests/launcher-licensing.test.ts
 
-✔ the launcher sees exactly the games the account owns (305.6796ms)
-✔ signing out removes access immediately (160.7915ms)
-✔ tokens refresh and rotate; a replayed refresh token kills the session (145.975ms)
-✔ a wrong PKCE verifier or a reused code is refused (61.6579ms)
-✔ a key is redeemed once, onto one account; a stolen key is useless (211.2861ms)
-✔ two accounts racing for one key: exactly one wins (146.6387ms)
-✔ expired keys are refused (72.047ms)
-✔ revoked licence: no manifest, no launch, and the old token fails its online check (205.3169ms)
-✔ tampered, forged and wrong-game tokens are refused (170.7578ms)
-✔ offline grace: a token keeps working for 7 days, then must re-check; clock skew is bounded (112.9787ms)
-✔ second PC is blocked; deactivating from the launcher frees it; the old PC's token stops at its next check (216.2713ms)
-✔ deactivating from the website frees the slot too (same code path as the account page) (120.899ms)
-✔ deactivations are rate-limited (3 per 30 days per licence) (332.6886ms)
-✔ reinstalling on the same PC keeps its activation (173.0264ms)
-✔ buying: payment grants the licence once, a replayed webhook changes nothing, a refund revokes it (773.8756ms)
-✔ a failed payment grants nothing (39.0689ms)
-✔ already owned: the checkout page refuses to sell it again (414.6813ms)
-✔ View license key: the owner sees their key; others get 404; signed out gets 401 (243.4336ms)
-✔ View license key: a purchase comes with its own key; a studio grant has none (248.0906ms)
-✔ View license key is rate-limited (775.3465ms)
-ℹ tests 20
+✔ the launcher sees exactly the games the account owns (1767.0483ms)
+✔ signing out removes access immediately (554.8966ms)
+✔ tokens refresh and rotate; a replayed refresh token kills the session (149.7142ms)
+✔ a wrong PKCE verifier or a reused code is refused (60.3319ms)
+✔ a key is redeemed once, onto one account; a stolen key is useless (392.0008ms)
+✔ two accounts racing for one key: exactly one wins (141.1566ms)
+✔ expired keys are refused (68.5541ms)
+✔ revoked licence: no manifest, no launch, and the old token fails its online check (627.9685ms)
+✔ tampered, forged and wrong-game tokens are refused (181.9614ms)
+✔ offline grace: a token keeps working for 7 days, then must re-check; clock skew is bounded (106.1518ms)
+✔ second PC is blocked; deactivating from the launcher frees it; the old PC's token stops at its next check (435.3585ms)
+✔ deactivating from the website frees the slot too (same code path as the account page) (132.0223ms)
+✔ deactivations are rate-limited (3 per 30 days per licence) (351.9171ms)
+✔ reinstalling on the same PC keeps its activation (173.4514ms)
+✔ buying: payment grants the licence once, a replayed webhook changes nothing, a refund revokes it (1375.1979ms)
+✔ a failed payment grants nothing (39.1074ms)
+✔ already owned: the checkout page refuses to sell it again (1354.8191ms)
+✔ View license key: the owner sees their key; others get 404; signed out gets 401 (923.5603ms)
+✔ View license key: a purchase comes with its own key; a studio grant has none (281.0832ms)
+✔ View license key is rate-limited (765.0267ms)
+✔ pending bank payment: completed but unpaid grants nothing until async_payment_succeeded (712.1733ms)
+✔ refund, then a replayed checkout.session.completed: stays revoked; key, tokens and activations are dead (314.6938ms)
+✔ chargeback opened revokes; won restores; lost stays revoked (290.9328ms)
+✔ amount, currency or mode mismatch: not fulfilled, flagged for review (80.5438ms)
+✔ a forged webhook (bad signature) is rejected and changes nothing (110.9972ms)
+✔ success page with someone else's session id shows nothing and grants nothing (121.0605ms)
+ℹ tests 26
 ℹ suites 0
-ℹ pass 20
+ℹ pass 26
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 5387.851
+ℹ duration_ms 12004.8856

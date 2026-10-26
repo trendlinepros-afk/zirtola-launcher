@@ -100,6 +100,10 @@ pub struct CatalogGame {
     /// Link to the website's system requirements, with a one-line minimum.
     #[serde(default)]
     pub requirements: Option<Requirements>,
+    /// Where the game keeps saves and settings, outside the install folder,
+    /// e.g. `%LOCALAPPDATA%\GranitePit\Saved`. Shown when uninstalling.
+    #[serde(default)]
+    pub save_location: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

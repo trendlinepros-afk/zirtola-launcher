@@ -41,8 +41,11 @@ pub struct Settings {
     pub library_dir: PathBuf,
     /// Concurrent chunk downloads.
     pub parallel_downloads: usize,
-    /// Check for a launcher update at start-up.
+    /// Install launcher updates found at start-up (a required update, below the
+    /// website's min_launcher_version, installs regardless).
     pub auto_update_launcher: bool,
+    /// Start game updates found at start-up and before Play.
+    pub auto_update_games: bool,
     /// Send the hardware summary (see hardware.rs) to the website.
     pub share_hardware_info: bool,
     /// Ask to send a crash report when a game crashes.
@@ -56,6 +59,7 @@ impl Default for Settings {
             library_dir: PathBuf::from(format!("{drive}\\Zirtola Games")),
             parallel_downloads: 8,
             auto_update_launcher: true,
+            auto_update_games: true,
             share_hardware_info: true,
             offer_crash_reports: true,
         }

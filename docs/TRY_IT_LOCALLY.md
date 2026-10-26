@@ -61,7 +61,7 @@ It ends by printing:
 3. The launcher offers **Update to 1.0.1**. Click it: it downloads only the changed part.
 4. **What's new** opens by itself, with 1.0.1 marked **Installed** and **Beta**.
    The notes button (page icon) next to Play shows it any time.
-5. The website's game page (<http://localhost:3000/games/dirt-simulator>) shows the stable changelog.
+5. The website's game page (<http://localhost:3000/games/dirt-digger>) shows the stable changelog.
 
 ## 6. More to try
 

@@ -78,9 +78,30 @@ pub fn installed_manifest(root: &Path) -> anyhow::Result<Option<(SignedManifest,
     Ok(Some((env, m)))
 }
 
-/// Absolute path of a manifest file inside `root`.
+/// Absolute path of a manifest file inside `root`. Refuses to go through a
+/// symbolic link or junction inside the install folder, so a write or delete
+/// can never land outside it (for example in the player's save folder).
 pub fn file_path(root: &Path, rel: &str) -> anyhow::Result<PathBuf> {
-    Ok(root.join(safe_relative_path(rel)?))
+    let rel = safe_relative_path(rel)?;
+    let mut cur = root.to_path_buf();
+    for c in rel.components() {
+        cur.push(c);
+        match std::fs::symlink_metadata(&cur) {
+            Ok(md) if is_link(&md) => anyhow::bail!(
+                "refusing to follow a link inside the install folder: {}",
+                cur.display()
+            ),
+            Ok(_) => {}
+            Err(_) => break, // doesn't exist yet: nothing below it can be a link
+        }
+    }
+    Ok(root.join(rel))
+}
+
+// On Windows this is true for symbolic links and junctions (name-surrogate
+// reparse points) but not for OneDrive placeholders and other reparse points.
+fn is_link(md: &std::fs::Metadata) -> bool {
+    md.file_type().is_symlink()
 }
 
 pub fn part_path(p: &Path) -> PathBuf {

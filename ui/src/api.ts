@@ -31,6 +31,8 @@ export interface CatalogGame {
   bug_report_url?: string | null;
   /** The website's system requirements section, with a one-line minimum. */
   requirements?: { url: string; minimum_target?: string | null; minimum_summary?: string | null } | null;
+  /** Where the game keeps saves and settings, e.g. %LOCALAPPDATA%\GranitePit\Saved (never in the install folder). */
+  save_location?: string | null;
 }
 
 export type JobKind = "install" | "update" | "verify" | "uninstall";
@@ -89,12 +91,15 @@ export interface AppInfo {
   store_url: string | null;
   account_url: string | null;
   support_url: string | null;
+  /** Oldest launcher the website supports; below it the update is required. */
+  min_launcher_version?: string | null;
 }
 
 export interface Settings {
   library_dir: string;
   parallel_downloads: number;
   auto_update_launcher: boolean;
+  auto_update_games: boolean;
   share_hardware_info: boolean;
   offer_crash_reports: boolean;
 }
@@ -154,6 +159,8 @@ export const api = {
   update: (gameId: string) => invoke<void>("update_game", { gameId }),
   verify: (gameId: string) => invoke<void>("verify_game", { gameId }),
   uninstall: (gameId: string) => invoke<void>("uninstall_game", { gameId }),
+  deleteGameSaves: (gameId: string) => invoke<string>("delete_game_saves", { gameId }),
+  resolveSaveLocation: (raw: string) => invoke<string>("resolve_save_location", { raw }),
   pause: (gameId: string) => invoke<void>("pause_job", { gameId }),
   forget: (gameId: string) => invoke<void>("forget_install", { gameId }),
   launch: (gameId: string, title?: string) => invoke<void>("launch_game", { gameId, title: title ?? null }),

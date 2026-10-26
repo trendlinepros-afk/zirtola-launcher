@@ -28,10 +28,11 @@
       "early_access": true,
       "bug_report_url": "http://localhost:3000/community/bugs?game=dirt-simulator",
       "requirements": {
-        "url": "http://localhost:3000/games/dirt-simulator#system-requirements",
+        "url": "http://localhost:3000/games/dirt-digger#system-requirements",
         "minimum_target": "1080p · Low · 30 fps",
         "minimum_summary": "Ryzen 5 3600 / Core i5-10400 · 16 GB RAM · RTX 2060 / RX 6600 · SSD"
-      }
+      },
+      "save_location": "%LOCALAPPDATA%\\GranitePit\\Saved"
     },
     {
       "id": "alaskan-bush-simulator",

@@ -339,6 +339,7 @@ function catalog() {
         early_access: g.early_access ?? false,
         bug_report_url: g.bug_report_url ?? null,
         requirements: g.requirements ?? null,
+        save_location: g.save_location ?? null,
       };
     }),
   };

@@ -19,6 +19,8 @@ pub struct AppInfo {
     store_url: Option<String>,
     account_url: Option<String>,
     support_url: Option<String>,
+    /// Oldest launcher the website still supports; below it the update is required.
+    min_launcher_version: Option<String>,
 }
 
 #[tauri::command]
@@ -31,6 +33,7 @@ pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> CmdResult<A
         store_url: cfg.as_ref().map(|c| c.store_url.clone()),
         account_url: cfg.as_ref().and_then(|c| c.account_url.clone()),
         support_url: cfg.as_ref().and_then(|c| c.support_url.clone()),
+        min_launcher_version: cfg.as_ref().and_then(|c| c.min_launcher_version.clone()),
     })
 }
 
@@ -388,6 +391,39 @@ pub async fn uninstall_game(
     jobs::begin(&state, &game_id, JobKind::Uninstall)?;
     jobs::spawn_uninstall(app, game_id, root);
     Ok(())
+}
+
+/// "Also delete saves?" after uninstalling. Saves never live in the install
+/// folder: the catalogue names the folder (e.g. %LOCALAPPDATA%\GranitePit\Saved)
+/// and this deletes it only after the player ticked the box, and only if it
+/// resolves inside the player's own profile folders.
+#[tauri::command]
+pub async fn delete_game_saves(state: State<'_, AppState>, game_id: String) -> CmdResult<String> {
+    if !valid_game_id(&game_id) {
+        return Err(CmdError::new("bad_game", "Unknown game."));
+    }
+    let catalog = state.api.catalog().await?;
+    let game = catalog
+        .games
+        .into_iter()
+        .find(|g| g.id == game_id)
+        .ok_or_else(|| CmdError::new("bad_game", "Unknown game."))?;
+    let raw = game
+        .save_location
+        .ok_or_else(|| CmdError::new("no_saves", "This game doesn't say where it keeps its saves."))?;
+    let dir = crate::saves::resolve_save_dir(&raw).map_err(|e| CmdError::new("bad_save_dir", e))?;
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).map_err(|e| CmdError::new("delete_failed", format!("Couldn't delete {}: {e}", dir.display())))?;
+    }
+    Ok(dir.display().to_string())
+}
+
+/// Where a game keeps its saves on this PC (for the uninstall dialog).
+#[tauri::command]
+pub fn resolve_save_location(raw: String) -> CmdResult<String> {
+    crate::saves::resolve_save_dir(&raw)
+        .map(|p| p.display().to_string())
+        .map_err(|e| CmdError::new("bad_save_dir", e))
 }
 
 /// Pause (cancel) the running job. Installs and updates resume from where they stopped.

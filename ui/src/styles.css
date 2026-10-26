@@ -255,3 +255,13 @@ textarea.text.comment { width: 100%; height: auto; padding: 10px 12px; resize: v
 .reqs a .ico { display: inline-flex; width: 14px; height: 14px; }
 .reqs a .ico svg { width: 14px; height: 14px; }
 .reqs-min { margin-top: 3px !important; }
+
+/* ---------------------------------------------------------------- update checks */
+.update-note { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 12.5px; color: var(--muted); }
+.update-note .spinner.small { width: 12px; height: 12px; }
+.pills { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.pill.update { cursor: pointer; background: rgba(76, 175, 120, .16); border-color: rgba(76, 175, 120, .5); color: #9fe0b9; font: inherit; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.pill.update:hover { background: rgba(76, 175, 120, .26); }
+.saves-box { margin: 12px 0; padding: 12px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid var(--line, rgba(255,255,255,.1)); }
+.saves-box p { margin: 0 0 6px; }
+.saves-box .path { display: block; font: 12.5px ui-monospace, Consolas, monospace; word-break: break-all; margin-bottom: 10px; }

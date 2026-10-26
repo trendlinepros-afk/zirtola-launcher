@@ -22,6 +22,7 @@ import { icons, keyArt, logoMark } from "./art";
 import * as fmt from "./format";
 import { focusFirst, onGamepadActive, onNavAction } from "./nav";
 import { buyUrl, openLink, storeUrl } from "./links";
+import { needsRecheck, runStartupChecks } from "./startup";
 
 // Open a website link; on failure (no URL yet, browser blocked) tell the player.
 function openSite(url: string | null | undefined, what: string) {
@@ -46,6 +47,10 @@ const S = {
   settings: null as Settings | null,
   launcherUpdate: null as { version: string; notes: string | null } | null,
   launcherUpdating: null as { downloaded: number; total: number | null } | null,
+  // Update checks: when the last one succeeded, and a small note if it couldn't run.
+  lastUpdateCheck: null as number | null,
+  checkingUpdates: false,
+  updateNote: null as string | null,
   gamepad: false,
   // Purchases the player started from the launcher: game id -> start time.
   pending: new Map<string, number>(),
@@ -288,7 +293,12 @@ function selectedGame(): LibraryGame | undefined {
 function libraryView() {
   const g = selectedGame();
   if (!g) return h("div", { class: "empty" }, h("div", { class: "spinner" }));
-  return h("div", { class: "library" }, hero(g), shelf());
+  const note = S.checkingUpdates
+    ? h("p", { class: "update-note", "data-id": "update-note" }, h("span", { class: "spinner small" }), "Checking for updates…")
+    : S.updateNote
+      ? h("p", { class: "update-note", "data-id": "update-note" }, S.updateNote)
+      : null;
+  return h("div", { class: "library" }, note, hero(g), shelf());
 }
 
 function hero(lg: LibraryGame) {
@@ -309,7 +319,18 @@ function hero(lg: LibraryGame) {
     h(
       "div",
       { class: "hero-body" },
-      h("span", { class: `pill ${g.status}` }, fmt.statusLabel(g.status)),
+      h(
+        "div",
+        { class: "pills" },
+        h("span", { class: `pill ${g.status}` }, fmt.statusLabel(g.status)),
+        lg.owned && inst?.update_available
+          ? h(
+              "button",
+              { class: "pill update", type: "button", "data-id": "update-available", title: "See what's new", onclick: () => void whatsNew(lg) },
+              `Update available${inst.latest_version ? ` · ${inst.latest_version}` : ""} · What's new`,
+            )
+          : null,
+      ),
       h("h1", {}, g.title),
       h("p", { class: "tagline" }, g.tagline),
       h("p", { class: "desc" }, g.description),
@@ -641,6 +662,19 @@ async function run(fn: () => Promise<unknown>) {
 }
 
 async function launch(g: CatalogGame) {
+  // Re-check for a game update if the last check is more than ~10 minutes old.
+  if (S.me && needsRecheck(S.lastUpdateCheck, Date.now())) {
+    await loadLibrary();
+    const lg = S.library.find((x) => x.game.id === g.id);
+    if (lg?.install?.update_available && !lg.job) {
+      if (S.settings?.auto_update_games) {
+        toast(`${g.title} ${lg.install.latest_version ?? ""} is out. Updating first; press Play when it's done.`);
+        await run(() => api.update(g.id));
+        return;
+      }
+      toast(`${g.title} ${lg.install.latest_version ?? ""} is available. Starting the version you have.`);
+    }
+  }
   try {
     await api.launch(g.id, g.title);
     toast(`Starting ${g.title}…`);
@@ -905,6 +939,8 @@ async function loadLibrary() {
     S.library = [...lib.filter((g) => g.owned), ...lib.filter((g) => !g.owned)];
     if (!S.selected || !S.library.some((g) => g.game.id === S.selected)) S.selected = S.library[0]?.game.id ?? null;
     S.offline = null;
+    S.lastUpdateCheck = Date.now();
+    S.updateNote = null;
     settlePurchases();
   } catch (e) {
     handleError(e);
@@ -1024,18 +1060,42 @@ function redeemDialog() {
   setTimeout(() => input.focus(), 0);
 }
 
-function confirmUninstall(lg: LibraryGame) {
+async function confirmUninstall(lg: LibraryGame) {
+  const raw = lg.game.save_location ?? null;
+  const where = raw ? await api.resolveSaveLocation(raw).catch(() => null) : null;
+  const alsoSaves = h("input", { type: "checkbox", "data-id": "delete-saves" }) as HTMLInputElement;
   const close = modal(
     `Uninstall ${lg.game.title}?`,
     h(
       "div",
       {},
-      h("p", { class: "muted" }, `This deletes the game files in ${lg.install?.path}. Saves and settings stored in your user folder are not touched. You can install again at any time.`),
+      h("p", { class: "muted" }, `This deletes the game files in ${lg.install?.path}. Only files the game was installed with are removed; anything else in that folder stays. You can install again at any time.`),
+      where
+        ? h(
+            "div",
+            { class: "saves-box" },
+            h("p", {}, "Your saves and settings are kept separately, in:"),
+            h("code", { class: "path", "data-id": "save-path" }, where),
+            h("label", { class: "confirm-row" }, alsoSaves, h("span", {}, "Also delete saves (this can't be undone)")),
+          )
+        : h("p", { class: "muted small" }, "Saves and settings are stored outside the install folder and are not touched."),
       h(
         "div",
         { class: "modal-actions" },
         btn("cancel", "Keep it", () => close(), { cls: "ghost" }),
-        btn("confirm-uninstall", "Uninstall", async () => { close(); await run(() => api.uninstall(lg.game.id)); }, { cls: "danger" }),
+        btn("confirm-uninstall", "Uninstall", async () => {
+          const deleteSaves = alsoSaves.checked;
+          close();
+          await run(() => api.uninstall(lg.game.id));
+          if (deleteSaves) {
+            try {
+              const gone = await api.deleteGameSaves(lg.game.id);
+              toast(`Saves deleted from ${gone}.`);
+            } catch (e) {
+              toast(errorMessage(e), "error");
+            }
+          }
+        }, { cls: "danger" }),
       ),
     ),
   );
@@ -1062,6 +1122,8 @@ function settingsView() {
   par.addEventListener("change", () => save({ parallel_downloads: +par.value }));
   const auto = h("input", { type: "checkbox", "data-id": "auto-update", checked: s.auto_update_launcher }) as HTMLInputElement;
   auto.addEventListener("change", () => save({ auto_update_launcher: auto.checked }));
+  const autoGames = h("input", { type: "checkbox", "data-id": "auto-update-games", checked: s.auto_update_games }) as HTMLInputElement;
+  autoGames.addEventListener("change", () => save({ auto_update_games: autoGames.checked }));
   const hw = h("input", { type: "checkbox", "data-id": "share-hw", checked: s.share_hardware_info }) as HTMLInputElement;
   hw.addEventListener("change", () => save({ share_hardware_info: hw.checked }));
   const crashes = h("input", { type: "checkbox", "data-id": "offer-crash", checked: s.offer_crash_reports }) as HTMLInputElement;
@@ -1090,7 +1152,8 @@ function settingsView() {
       "section",
       { class: "card" },
       h("h3", {}, "Launcher"),
-      h("label", { class: "setting" }, h("div", {}, h("strong", {}, "Update the launcher automatically"), h("small", {}, "Checks for a new launcher version when it starts.")), auto),
+      h("label", { class: "setting" }, h("div", {}, h("strong", {}, "Update the launcher automatically"), h("small", {}, "Checks every time the launcher starts and installs a new version. Required updates always install.")), auto),
+      h("label", { class: "setting" }, h("div", {}, h("strong", {}, "Update games automatically"), h("small", {}, "Checks every time the launcher starts and before you play. Updates never touch your saves or settings.")), autoGames),
       h(
         "div",
         { class: "setting" },
@@ -1339,14 +1402,60 @@ async function boot() {
     S.offline = `Can't reach Zirtola right now (${errorMessage(e)}).`;
   }
   S.booted = true;
-  if (S.me) await loadLibrary();
-  else render();
+  await startupUpdateChecks();
   focusFirst();
   if (S.pending.size) schedulePurchasePoll();
   if (S.me) api.pendingCrashes().then((list) => list.forEach(queueCrash)).catch(() => undefined);
   const link = await api.startupDeepLink().catch(() => null);
   if (link) handleDeepLink(link);
-  if (S.settings?.auto_update_launcher) checkLauncherUpdate(false);
+}
+
+// Every start: the launcher's own update and every owned game's update, in
+// parallel, before the library is shown as current. Offline never blocks.
+async function startupUpdateChecks() {
+  S.checkingUpdates = true;
+  render();
+  const res = await runStartupChecks({
+    currentVersion: S.info?.version ?? "0.0.0",
+    minLauncherVersion: S.info?.min_launcher_version ?? null,
+    autoUpdateLauncher: S.settings?.auto_update_launcher ?? true,
+    autoUpdateGames: S.settings?.auto_update_games ?? true,
+    signedIn: Boolean(S.me),
+    checkLauncherUpdate: async () => {
+      const u = await api.checkLauncherUpdate();
+      S.launcherUpdate = u ? { version: u.version, notes: u.notes } : null;
+      return u;
+    },
+    installLauncherUpdate: async () => {
+      S.launcherUpdating = { downloaded: 0, total: null };
+      render();
+      try {
+        await api.installLauncherUpdate(); // restarts the launcher
+      } catch (e) {
+        S.launcherUpdating = null;
+        throw e;
+      }
+    },
+    refreshLibrary: async () => {
+      const lib = await api.library();
+      S.library = [...lib.filter((g) => g.owned), ...lib.filter((g) => !g.owned)];
+      if (!S.selected || !S.library.some((g) => g.game.id === S.selected)) S.selected = S.library[0]?.game.id ?? null;
+      settlePurchases();
+      return lib.map((g) => ({ id: g.game.id, owned: g.owned, updateAvailable: Boolean(g.install?.update_available), busy: Boolean(g.job) }));
+    },
+    startGameUpdate: (id) => api.update(id),
+  });
+  S.checkingUpdates = false;
+  if (!res.note) S.lastUpdateCheck = res.checkedAt;
+  S.updateNote = res.note;
+  if (res.launcherUpdateRequired && !res.launcherInstalling) {
+    toast(`This launcher version is no longer supported. Update to ${S.launcherUpdate?.version ?? "the latest version"} to keep playing online.`, "error");
+  }
+  if (res.autoUpdating.length) {
+    const names = res.autoUpdating.map((id) => S.library.find((g) => g.game.id === id)?.game.title ?? id);
+    toast(`Updating ${names.join(", ")}.`);
+  }
+  render();
 }
 
 // Keep ownership and update status fresh: when the window regains focus (at

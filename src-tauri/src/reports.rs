@@ -122,13 +122,17 @@ fn candidate(
 }
 
 /// Wait for a game the launcher started; if it crashed, offer a report.
+/// Also times the run for playtime when a player is signed in.
 pub fn watch_game(
     app: AppHandle,
     mut child: std::process::Child,
     root: PathBuf,
     m: Manifest,
     title: String,
+    user_id: Option<String>,
 ) {
+    let tracker = user_id
+        .map(|uid| crate::playtime::start(app.clone(), uid, m.game_id.clone(), root.clone()));
     let roots = crash::crash_roots(&root, &m);
     let before: std::collections::HashSet<String> = crash::list_crash_dirs(&roots)
         .into_iter()
@@ -137,6 +141,9 @@ pub fn watch_game(
     let started = SystemTime::now();
     std::thread::spawn(move || {
         let code = child.wait().ok().and_then(|s| s.code());
+        if let Some(t) = tracker {
+            t.finish();
+        }
         // Give UE's crash handler a moment to finish writing the folder.
         std::thread::sleep(Duration::from_secs(2));
         let state = app.state::<AppState>();

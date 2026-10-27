@@ -177,6 +177,58 @@ pub struct LaunchToken {
     pub expires_at: String,
 }
 
+/// One run of a game, as reported to `POST /v1/playtime`. The values are
+/// running totals for the run, so re-sending a report is always safe.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaytimeReport {
+    pub game_id: String,
+    /// The launcher's own id for this run.
+    pub session_id: String,
+    /// RFC 3339.
+    pub started_at: String,
+    /// Time the game was in front and the player gave input recently.
+    pub active_seconds: u64,
+    /// Wall time since the game started.
+    pub total_seconds: u64,
+    pub ended: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GamePlaytime {
+    pub game_id: String,
+    pub active_seconds: u64,
+    #[serde(default)]
+    pub total_seconds: u64,
+    /// `active_seconds` rounded down to the quarter hour.
+    #[serde(default)]
+    pub hours: f64,
+    #[serde(default)]
+    pub last_played_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Playtime {
+    #[serde(default)]
+    pub games: Vec<GamePlaytime>,
+    /// Per-report outcome of a POST (absent on GET).
+    #[serde(default)]
+    pub results: Vec<PlaytimeResult>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PlaytimeResult {
+    pub session_id: String,
+    pub ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Hours played in quarter-hour steps, rounded down (899 s = 0, 900 s = 0.25),
+/// the same rounding the website uses.
+pub fn quarter_hours(seconds: u64) -> f64 {
+    (seconds / 900) as f64 / 4.0
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct ErrorBody {
     error: String,
@@ -466,6 +518,26 @@ impl ApiClient {
             .to_string())
     }
 
+    /// The player's hours per game.
+    pub async fn playtime(&self, at: &str) -> Result<Playtime, ApiError> {
+        self.get("/v1/playtime", Some(at)).await
+    }
+
+    /// Report runs (one or several queued while offline); returns the
+    /// updated totals and which reports were accepted.
+    pub async fn post_playtime(
+        &self,
+        at: &str,
+        reports: &[PlaytimeReport],
+    ) -> Result<Playtime, ApiError> {
+        self.post(
+            "/v1/playtime",
+            Some(at),
+            &serde_json::json!({ "sessions": reports }),
+        )
+        .await
+    }
+
     /// Request a launch token. `device_id` is the launcher's random install id
     /// (the server stores only a hash) and `device_name` a friendly PC name;
     /// together they let the studio see and reset a license's devices.
@@ -482,5 +554,31 @@ impl ApiClient {
             &serde_json::json!({ "game_id": game_id, "device_id": device_id, "device_name": device_name }),
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod playtime_tests {
+    use super::*;
+
+    #[test]
+    fn quarter_hours_round_down() {
+        assert_eq!(quarter_hours(0), 0.0);
+        assert_eq!(quarter_hours(899), 0.0);
+        assert_eq!(quarter_hours(900), 0.25);
+        assert_eq!(quarter_hours(3_599), 0.75);
+        assert_eq!(quarter_hours(3_600), 1.0);
+        assert_eq!(quarter_hours(19_400), 5.25);
+    }
+
+    #[test]
+    fn playtime_response_parses() {
+        let p: Playtime = serde_json::from_str(
+            r#"{"hours_step":0.25,"results":[{"session_id":"abcdefgh","ok":true}],
+                "games":[{"game_id":"dirt-simulator","active_seconds":19400,"total_seconds":20400,"hours":5.25,"last_played_at":null}]}"#,
+        )
+        .unwrap();
+        assert_eq!(p.games[0].hours, 5.25);
+        assert!(p.results[0].ok);
     }
 }

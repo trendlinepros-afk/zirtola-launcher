@@ -43,7 +43,8 @@ pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> CmdResult<A
 pub async fn restore_session(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Option<Me>> {
     let me = state.restore_session().await?;
     if me.is_some() {
-        tauri::async_runtime::spawn(crate::reports::report_hardware_if_needed(app));
+        tauri::async_runtime::spawn(crate::reports::report_hardware_if_needed(app.clone()));
+        tauri::async_runtime::spawn(crate::playtime::flush(app));
     }
     Ok(me)
 }
@@ -62,7 +63,9 @@ pub async fn sign_in(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Me
             Err(e) => CmdError::new("sign_in_failed", format!("{e:#}")),
         })?;
     let me = state.start_session(tokens).await?;
-    tauri::async_runtime::spawn(crate::reports::report_hardware_if_needed(app));
+    crate::playtime::clear_cache();
+    tauri::async_runtime::spawn(crate::reports::report_hardware_if_needed(app.clone()));
+    tauri::async_runtime::spawn(crate::playtime::flush(app));
     Ok(me)
 }
 
@@ -82,6 +85,7 @@ pub async fn sign_out(state: State<'_, AppState>) -> CmdResult<()> {
         }
     }
     auth::clear_refresh_token(state.api.base());
+    crate::playtime::clear_cache();
     Ok(())
 }
 
@@ -128,6 +132,10 @@ pub struct LibraryGame {
     branch: String,
     install: Option<InstallInfo>,
     job: Option<JobKind>,
+    /// Active play time (website totals plus runs not sent yet).
+    playtime_seconds: u64,
+    /// The same, rounded down to the quarter hour.
+    hours_played: f64,
 }
 
 #[tauri::command]
@@ -146,6 +154,7 @@ pub async fn library(state: State<'_, AppState>) -> CmdResult<Vec<LibraryGame>> 
         vec![]
     };
     let registry = state.registry.lock().await.installs.clone();
+    let played = crate::playtime::active_seconds(&state).await;
 
     let mut out = Vec::new();
     for g in catalog.games {
@@ -178,6 +187,8 @@ pub async fn library(state: State<'_, AppState>) -> CmdResult<Vec<LibraryGame>> 
                 .map(|r| r.branch.clone())
                 .unwrap_or_else(|| "live".into()),
             job: state.job_running(&g.id),
+            playtime_seconds: played.get(&g.id).copied().unwrap_or(0),
+            hours_played: zirtola_core::api::quarter_hours(played.get(&g.id).copied().unwrap_or(0)),
             game: g,
             install,
         });
@@ -481,7 +492,8 @@ pub async fn launch_game(
     let child = install::launch(&root, &m, &token.token, state.api.base())
         .map_err(|e| CmdError::new("launch_failed", format!("{e:#}")))?;
     let title = title.unwrap_or_else(|| m.game_id.clone());
-    crate::reports::watch_game(app, child, root, m, title);
+    let user_id = crate::playtime::current_user(&state).await;
+    crate::reports::watch_game(app, child, root, m, title, user_id);
     Ok(())
 }
 

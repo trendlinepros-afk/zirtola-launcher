@@ -372,6 +372,43 @@ normalised top frames. `413 too_large`, `429 slow_down` (20 per hour per account
 The crash key is per game (Studio → Licensing → Launcher catalogue). See
 GAME_INTEGRATION.md.
 
+### Playtime
+
+The launcher times every run of a game it starts (`src-tauri/src/playtime.rs`)
+and reports it, so players see their hours on the game page and on their
+website profile.
+
+`POST /v1/playtime`, every 5 minutes while a game runs and once when it exits.
+Unsent reports are queued in `playtime-pending.json` (tagged with the account
+that played) and flushed after sign-in or the next report:
+
+```json
+{ "sessions": [ { "game_id": "dirt-simulator", "session_id": "<random per run>",
+                  "started_at": "2026-10-27T18:02:11Z", "active_seconds": 3125,
+                  "total_seconds": 3600, "ended": false } ] }
+```
+
+- `total_seconds`: wall time since the game started (gaps over a minute,
+  such as the PC sleeping, count as one minute).
+- `active_seconds`: time a program from the game's install folder had the
+  foreground window **and** the keyboard, mouse or an XInput controller was
+  used in the last 5 minutes. This is what the player sees as hours played.
+- Values are running totals for the run, so re-sending is safe; the website
+  keeps the largest values per `session_id`.
+
+The response, and `GET /v1/playtime`, carry the player's totals:
+
+```json
+{ "hours_step": 0.25,
+  "results": [ { "session_id": "…", "ok": true } ],
+  "games": [ { "game_id": "dirt-simulator", "active_seconds": 19400, "total_seconds": 20400,
+               "hours": 5.25, "last_played_at": "2026-10-27T19:02:11Z" } ] }
+```
+
+Hours are `active_seconds` rounded **down** to the quarter hour
+(`zirtola_core::api::quarter_hours`). Reports refused for good
+(`bad_request`, `not_found`) leave the queue; anything else is retried.
+
 ## Publishing builds (website only)
 
 ```

@@ -106,8 +106,14 @@ pub async fn sign_in_browser(
     if !matches!(auth.scheme(), "https" | "http") {
         anyhow::bail!("authorization endpoint must be http(s)");
     }
-    if crate::state::dev_mode() && std::env::var_os("ZIRTOLA_NO_BROWSER").is_some() {
-        // Development: print the URL instead of opening it, so a test browser can use it.
+    // Debug builds only: print the URL instead of opening it, so a test
+    // browser can use it. Release builds always open the default browser.
+    #[cfg(debug_assertions)]
+    let suppressed = std::env::var_os("ZIRTOLA_NO_BROWSER").is_some();
+    #[cfg(not(debug_assertions))]
+    let suppressed = false;
+    if suppressed {
+        #[cfg(debug_assertions)]
         eprintln!("ZIRTOLA_AUTHORIZE_URL={auth}");
     } else {
         open::that_detached(auth.as_str())?;

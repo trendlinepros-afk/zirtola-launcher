@@ -21,6 +21,10 @@ pub fn dev_mode() -> bool {
     cfg!(debug_assertions) || option_env!("ZIRTOLA_DEV_BUILD").is_some()
 }
 
+// Test switches (ZIRTOLA_NO_BROWSER, ZIRTOLA_PREREQ_SIMULATE*) exist only in
+// debug builds (#[cfg(debug_assertions)]). Release builds, including
+// ZIRTOLA_DEV_BUILD ones, never read them: that code is compiled out.
+
 pub fn api_base() -> String {
     if dev_mode() {
         if let Ok(v) = std::env::var("ZIRTOLA_API_BASE") {

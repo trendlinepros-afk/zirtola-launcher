@@ -618,8 +618,10 @@ pub fn open_url(url: String) -> CmdResult<()> {
     if !matches!(u.scheme(), "https" | "http") {
         return Err(CmdError::new("bad_url", "Only web links can be opened."));
     }
-    if dev_mode() && std::env::var_os("ZIRTOLA_NO_BROWSER").is_some() {
-        // Automated tests read the URL from the log; a person sees why nothing opened.
+    // Debug builds only: automated tests switch the browser off and read the
+    // URL from the log. Compiled out of release builds, which always open it.
+    #[cfg(debug_assertions)]
+    if std::env::var_os("ZIRTOLA_NO_BROWSER").is_some() {
         eprintln!("ZIRTOLA_OPEN_URL={u}");
         return Err(CmdError::new(
             "browser_suppressed",

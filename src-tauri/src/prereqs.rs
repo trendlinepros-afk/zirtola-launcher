@@ -10,7 +10,7 @@
 //! must be valid and issued to Microsoft Corporation before it runs, with
 //! Windows' own administrator prompt.
 //!
-//! Testing (DEV builds only): ZIRTOLA_PREREQ_SIMULATE=vcredist,gpu,disk,windows
+//! Testing (debug builds only; compiled out of release builds): ZIRTOLA_PREREQ_SIMULATE=vcredist,gpu,disk,windows
 //! reports those as missing; ZIRTOLA_PREREQ_SIMULATE_FAIL=vcredist makes the
 //! first simulated install fail. Simulated installs never run anything.
 
@@ -48,18 +48,32 @@ pub struct Item {
 // ---------------------------------------------------------------- simulation (DEV only)
 
 static SIM_INSTALLED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+#[cfg(debug_assertions)]
 static SIM_FAILED_ONCE: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
+// Release builds: always empty, the variables are never read.
+#[cfg(not(debug_assertions))]
+fn sim_list(_var: &str) -> HashSet<String> {
+    HashSet::new()
+}
+
+#[cfg(debug_assertions)]
 fn sim_list(var: &str) -> HashSet<String> {
-    if !crate::state::dev_mode() {
-        return HashSet::new();
-    }
     std::env::var(var)
         .unwrap_or_default()
         .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+#[cfg(debug_assertions)]
+fn sim_text(s: &str) -> String {
+    format!("{s} (simulated)")
+}
+#[cfg(not(debug_assertions))]
+fn sim_text(_s: &str) -> String {
+    unreachable!("simulation is compiled out of release builds")
 }
 
 fn simulated_missing(id: &str) -> bool {
@@ -90,7 +104,7 @@ fn windows_item() -> Item {
         name: "Windows 10 (22H2) or Windows 11, 64-bit".into(),
         description: "The game needs a recent 64-bit Windows.".into(),
         status: if ok { "ok" } else { "unsupported" },
-        found: if simulated_missing("windows") { "Windows 10 1909 (18363) (simulated)".into() } else { format!("{name} {display} (build {build})").replace("  ", " ") },
+        found: if simulated_missing("windows") { sim_text("Windows 10 1909 (18363)") } else { format!("{name} {display} (build {build})").replace("  ", " ") },
         required: true,
         fixable: false,
         size_bytes: None,
@@ -193,7 +207,7 @@ struct GpuInfo {
 
 fn gpu_item() -> Item {
     let gpus = if simulated_missing("gpu") {
-        vec![GpuInfo { name: "Intel(R) HD Graphics 4000 (simulated)".into(), driver: "10.18.10.4252".into(), vendor: 0x8086, feature_level: Some("11_0"), shader_model: None }]
+        vec![GpuInfo { name: sim_text("Intel(R) HD Graphics 4000"), driver: "10.18.10.4252".into(), vendor: 0x8086, feature_level: Some("11_0"), shader_model: None }]
     } else {
         dx12_gpus()
     };
@@ -363,6 +377,7 @@ pub async fn install(
     }
     let send = |phase: &'static str, done: u64, total: u64, message: Option<String>| emit(Progress { id: id.into(), phase, done, total, message });
 
+    #[cfg(debug_assertions)]
     if sim_list("ZIRTOLA_PREREQ_SIMULATE").contains(id) {
         return simulate_install(id, &send).await;
     }
@@ -393,6 +408,7 @@ pub async fn install(
     }
 }
 
+#[cfg(debug_assertions)]
 async fn simulate_install(id: &str, send: &(impl Fn(&'static str, u64, u64, Option<String>) + Sync)) -> Result<(), String> {
     let total = 25 * 1024 * 1024u64;
     for step in 1..=20u64 {

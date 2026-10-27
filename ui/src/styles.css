@@ -195,7 +195,13 @@ input[type="checkbox"] { accent-color: var(--gold); width: 20px; height: 20px; }
 @keyframes fade { from { opacity: 0; } }
 
 /* ---------------------------------------------------------------- toasts & hints */
-.toasts { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 60; max-width: 420px; }
+/* Toasts live in a strip at the bottom of the window, in the layout: the page
+   above shrinks while one shows, so a toast never covers buttons or text. */
+body { display: flex; flex-direction: column; }
+#app { flex: 1; min-height: 0; height: auto; }
+.toasts { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; padding: 10px 18px 14px; background: var(--bg); border-top: 1px solid var(--line); }
+.toasts:empty { display: none; }
+.toasts .toast { max-width: 520px; }
 .toast { background: #1d242d; border: 1px solid var(--line-2); border-left: 3px solid var(--gold); padding: 12px 14px; border-radius: 10px; box-shadow: 0 12px 30px -12px #000; animation: slide .18s ease-out; line-height: 1.4; }
 .toast.error { border-left-color: var(--danger); }
 .toast.out { opacity: 0; transform: translateY(6px); transition: all .35s; }

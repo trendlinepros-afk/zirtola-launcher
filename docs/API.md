@@ -411,7 +411,7 @@ Hours are `active_seconds` rounded **down** to the quarter hour
 
 ### `POST {base}/v1/games/{id}/stats` (from the game, launch token)
 
-Career stats the **game** sends (not the launcher), authenticated with
+Career stats the **game** sends (gold mined/recovered, material moved; not the launcher), authenticated with
 `Authorization: Bearer <launch token>` (`ZIRTOLA_SESSION_TOKEN`). The launcher's
 only part is passing `ZIRTOLA_PLAY_SESSION_ID` (its playtime `session_id` for
 the run) to the game, so the website can check the game's active time against

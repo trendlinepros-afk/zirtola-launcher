@@ -510,11 +510,20 @@ pub async fn launch_game(
             async move { api.launch_token(&at, &gid, &did, &dname).await }
         })
         .await?;
-    let child = install::launch(&root, &m, &token.token, state.api.base())
-        .map_err(|e| CmdError::new("launch_failed", format!("{e:#}")))?;
+    // The run's playtime id, also given to the game so its career-stats
+    // reports can name the run (docs/GAME_STATS_API.md).
+    let play_session_id = crate::playtime::new_session_id();
+    let child = install::launch_with_env(
+        &root,
+        &m,
+        &token.token,
+        state.api.base(),
+        &[("ZIRTOLA_PLAY_SESSION_ID", play_session_id.as_str())],
+    )
+    .map_err(|e| CmdError::new("launch_failed", format!("{e:#}")))?;
     let title = title.unwrap_or_else(|| m.game_id.clone());
     let user_id = crate::playtime::current_user(&state).await;
-    crate::reports::watch_game(app, child, root, m, title, user_id);
+    crate::reports::watch_game(app, child, root, m, title, user_id, play_session_id);
     Ok(())
 }
 

@@ -8,7 +8,8 @@
 //! queued in `playtime-pending.json` and sent to `POST /v1/playtime`; reports
 //! that can't be sent (offline, signed out) stay queued and go with the next
 //! flush. The website keeps the largest values per session, so re-sending is
-//! always safe. See docs/API.md → Playtime.
+//! always safe. See docs/API.md → Playtime. The run's `session_id` is also
+//! given to the game (`ZIRTOLA_PLAY_SESSION_ID`) for its career-stats reports.
 
 use crate::state::AppState;
 use std::collections::HashMap;
@@ -69,7 +70,11 @@ fn queue(state: &AppState, user_id: &str, report: PlaytimeReport) {
     save_pending(state, &pending);
 }
 
-fn new_session_id() -> String {
+/// A new id for one run of a game. The launcher reports the run's playtime
+/// under it and passes it to the game as `ZIRTOLA_PLAY_SESSION_ID`, so the
+/// website can check the game's career stats against the launcher's measured
+/// play time for the same run (docs/GAME_STATS_API.md).
+pub fn new_session_id() -> String {
     use rand::RngCore;
     let mut buf = [0u8; 18];
     rand::rngs::OsRng.fill_bytes(&mut buf);
@@ -90,10 +95,15 @@ impl Tracker {
     }
 }
 
-pub fn start(app: AppHandle, user_id: String, game_id: String, root: PathBuf) -> Tracker {
+pub fn start(
+    app: AppHandle,
+    user_id: String,
+    game_id: String,
+    root: PathBuf,
+    session_id: String,
+) -> Tracker {
     let (stop, rx) = mpsc::channel::<()>();
     let thread = std::thread::spawn(move || {
-        let session_id = new_session_id();
         let started_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let mut probe = activity::Probe::new(&root);
         let (mut active, mut total) = (Duration::ZERO, Duration::ZERO);

@@ -409,6 +409,15 @@ Hours are `active_seconds` rounded **down** to the quarter hour
 (`zirtola_core::api::quarter_hours`). Reports refused for good
 (`bad_request`, `not_found`) leave the queue; anything else is retried.
 
+### `POST {base}/v1/games/{id}/stats` (from the game, launch token)
+
+Career stats the **game** sends (not the launcher), authenticated with
+`Authorization: Bearer <launch token>` (`ZIRTOLA_SESSION_TOKEN`). The launcher's
+only part is passing `ZIRTOLA_PLAY_SESSION_ID` (its playtime `session_id` for
+the run) to the game, so the website can check the game's active time against
+the launcher's. Full contract: [`docs/GAME_STATS_API.md`](GAME_STATS_API.md).
+The mock server implements it.
+
 ## Publishing builds (website only)
 
 ```

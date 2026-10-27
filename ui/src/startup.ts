@@ -7,10 +7,12 @@
 //   2. game updates: entitlements plus each owned game's latest manifest for
 //      its channel (the `library` command re-fetches both).
 // A launcher update is installed (and the launcher restarts) when the player
-// allows automatic updates, and always when this version is below the
-// website's min_launcher_version. Game updates are reported, and started when
-// the player allows automatic game updates. Offline, nothing blocks: the
-// result carries a short note instead.
+// allows automatic updates; otherwise it's offered in a prompt with its notes
+// (Update now / Later). It's required, with no "Later", when the release is
+// marked mandatory or this version is below the website's
+// min_launcher_version. Game updates are started when the player allows
+// automatic game updates, and otherwise offered the same way (updates.ts).
+// Offline, nothing blocks: the result carries a short note instead.
 
 export const STALE_AFTER_MS = 10 * 60_000;
 
@@ -27,7 +29,7 @@ export interface StartupDeps {
   autoUpdateLauncher: boolean;
   autoUpdateGames: boolean;
   signedIn: boolean;
-  checkLauncherUpdate: () => Promise<{ version: string } | null>;
+  checkLauncherUpdate: () => Promise<{ version: string; mandatory?: boolean } | null>;
   installLauncherUpdate: () => Promise<void>;
   refreshLibrary: () => Promise<StartupGame[]>;
   startGameUpdate: (gameId: string) => Promise<void>;
@@ -39,7 +41,11 @@ export interface StartupResult {
   launcherUpdate: string | null;
   launcherUpdateRequired: boolean;
   launcherInstalling: boolean;
+  /** Show the launcher update prompt: "required" has no Later. */
+  launcherPrompt: "required" | "optional" | null;
   gameUpdates: string[];
+  /** Game updates to offer in a prompt (not started automatically, not busy). */
+  gamePrompts: string[];
   autoUpdating: string[];
   /** The game check (entitlements and manifests) succeeded: safe to remember as "last checked". */
   gamesChecked: boolean;
@@ -79,7 +85,9 @@ export async function runStartupChecks(d: StartupDeps): Promise<StartupResult> {
     launcherUpdate: null,
     launcherUpdateRequired: required,
     launcherInstalling: false,
+    launcherPrompt: null,
     gameUpdates: [],
+    gamePrompts: [],
     autoUpdating: [],
     gamesChecked: false,
     note: null,
@@ -91,18 +99,20 @@ export async function runStartupChecks(d: StartupDeps): Promise<StartupResult> {
 
   if (launcher.status === "fulfilled" && launcher.value) {
     res.launcherUpdate = launcher.value.version;
-    if (required || d.autoUpdateLauncher) {
+    if (launcher.value.mandatory) res.launcherUpdateRequired = true;
+    if (d.autoUpdateLauncher) {
       res.launcherInstalling = true;
       try {
         await d.installLauncherUpdate(); // restarts the launcher on success
         return res;
       } catch {
         res.launcherInstalling = false;
-        res.note = required
-          ? "This launcher version is no longer supported and the update didn't install. Try again from the update button."
+        res.note = res.launcherUpdateRequired
+          ? "The required launcher update didn't install. Try again from the update button."
           : "Couldn't install the launcher update. You can try again from the update button.";
       }
     }
+    if (!res.launcherInstalling) res.launcherPrompt = res.launcherUpdateRequired ? "required" : "optional";
   }
 
   if (library.status === "fulfilled") {
@@ -119,6 +129,7 @@ export async function runStartupChecks(d: StartupDeps): Promise<StartupResult> {
         }
       }
     }
+    res.gamePrompts = library.value.filter((g) => g.owned && g.updateAvailable && !g.busy && !res.autoUpdating.includes(g.id)).map((g) => g.id);
   }
 
   if (!res.note) {

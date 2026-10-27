@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Update prompts.** A new launcher or game version opens a window with the
+  release notes of every version since the installed one and **Update now** /
+  **Later** (Later = not again this session; the update button stays).
+  Automatic updates are now off by default; turning them on in Settings
+  updates silently and shows What's new afterwards.
+- **Required updates.** A release marked mandatory (Studio checkbox and
+  reason, `--mandatory` in the publish scripts) has no Later and shows why.
+  Below the newest required game release, Play is disabled with the reason
+  as a tooltip, even when a newer optional release is live, and the website
+  refuses the launch token. The launcher sends its installed version and
+  channel when asking for one.
+- Release notes: section names on their own line (New, Changed, Fixes, ...)
+  are headings, also straight after a bullet.
+
 - The launcher is for game owners only: downloaded from zirtola.com
   (**Download Launcher**, signed in and owning a game) and updated from the
   website's update feed with the launcher's sign-in. Releases go to the private

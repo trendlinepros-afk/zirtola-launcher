@@ -1,21 +1,58 @@
 name: Release
 
-# Push a tag like v0.2.0 (matching package.json's version) to build, sign and
-# publish the installer and the auto-update feed as a DRAFT GitHub Release.
-# Review the draft and click Publish: installed launchers only see the update
-# once the release is published. See docs/RELEASING.md.
+# Push a tag like v0.2.1 (matching package.json's version): this builds and
+# signs the launcher and uploads it to the private Railway bucket under
+# launcher/0.2.1/. Players don't get it yet: nothing is published on GitHub,
+# and the bucket's pointer (launcher/latest.json) still names the old version.
+#
+# To make it live (or to roll back): Actions -> Release -> Run workflow ->
+# "promote" = 0.2.1 (or the older version). That rewrites the pointer; the
+# website serves it within a minute. See docs/RELEASING.md.
+#
+# Works with the repository private. Windows runner minutes count double on
+# private repos, so this job only builds (tests run in CI on every PR).
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      promote:
+        description: "Version to make live, e.g. 0.2.1 (it must already be uploaded). Use an older version to roll back."
+        required: true
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: launcher-release
+  cancel-in-progress: false
 
 jobs:
+  promote:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Point launcher/latest.json at ${{ inputs.promote }}
+        env:
+          LAUNCHER_BUCKET_ENDPOINT: ${{ secrets.LAUNCHER_BUCKET_ENDPOINT }}
+          LAUNCHER_BUCKET_NAME: ${{ secrets.LAUNCHER_BUCKET_NAME }}
+          LAUNCHER_BUCKET_REGION: ${{ secrets.LAUNCHER_BUCKET_REGION }}
+          LAUNCHER_BUCKET_ACCESS_KEY_ID: ${{ secrets.LAUNCHER_BUCKET_ACCESS_KEY_ID }}
+          LAUNCHER_BUCKET_SECRET_ACCESS_KEY: ${{ secrets.LAUNCHER_BUCKET_SECRET_ACCESS_KEY }}
+          LAUNCHER_BUCKET_PATH_STYLE: ${{ vars.LAUNCHER_BUCKET_PATH_STYLE }}
+        run: |
+          node scripts/launcher-bucket.mjs promote --version "${{ inputs.promote }}"
+          node scripts/launcher-bucket.mjs list
+
   release:
+    if: github.event_name == 'push'
     runs-on: windows-latest
+    timeout-minutes: 45
     env:
       # Authenticode signing (scripts/sign.ps1). Unset = unsigned build.
       ZIRTOLA_SIGN_MODE: ${{ vars.ZIRTOLA_SIGN_MODE }}
@@ -25,36 +62,22 @@ jobs:
       AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
       AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
       AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
-      # Production website API the launcher talks to (baked in at build time).
+      # Website API the launcher talks to (optional: www.zirtola.com is the default).
       ZIRTOLA_API_BASE: ${{ vars.ZIRTOLA_API_BASE }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check the tag matches package.json
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
-        run: |
-          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ("v$v" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} does not match package.json version $v" }
-
-      - name: Release notes
-        id: notes
-        shell: pwsh
-        run: |
-          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $f = "release-notes/$v.md"
-          if (-not (Test-Path $f)) { throw "Missing $f: write the release notes before tagging" }
-          $delim = "NOTES_$([guid]::NewGuid().ToString('N'))"
-          "body<<$delim" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
-          Get-Content $f -Raw | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
-          "$delim" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
-
-      - name: Require the updater signing key
+      - name: Check the tag, release notes and secrets
         shell: pwsh
         env:
           KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          BUCKET: ${{ secrets.LAUNCHER_BUCKET_NAME }}
         run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ("v$v" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} does not match package.json version $v" }
+          if (-not (Test-Path "release-notes/$v.md")) { throw "Missing release-notes/$v.md: write the release notes before tagging" }
           if (-not $env:KEY) { throw "Add the TAURI_SIGNING_PRIVATE_KEY secret (see docs/RELEASING.md)" }
+          if (-not $env:BUCKET) { throw "Add the LAUNCHER_BUCKET_* secrets (see docs/RELEASING.md)" }
 
       - uses: actions/setup-node@v4
         with:
@@ -71,40 +94,18 @@ jobs:
       - name: Secret scan
         run: node scripts/check-secrets.mjs
 
-      - name: Tests
-        run: cargo test --workspace --locked
-
       - name: Install the Azure Artifact Signing client
         if: env.ZIRTOLA_SIGN_MODE == 'azure'
         run: cargo install artifact-signing-cli --locked
 
-      - name: Build, sign and draft the release
-        uses: tauri-apps/tauri-action@v0
+      - name: Build and sign (installer + updater signature)
+        shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Zirtola Launcher ${{ github.ref_name }}"
-          releaseBody: ${{ steps.notes.outputs.body }}
-          releaseDraft: true
-          prerelease: false
-          includeUpdaterJson: true
-          updaterJsonPreferNsis: true
-          args: --config {"bundle":{"createUpdaterArtifacts":true}}
-
-      - name: Publish the installer checksum (installer.json, SHA256SUMS.txt)
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          node scripts/installer-info.mjs --dir target/release/bundle/nsis --version "$version" --repo "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME"
-          file=$(node -p "require('./target/release/bundle/nsis/installer.json').file")
-          # The website links to this exact asset name: fail if GitHub named it differently.
-          gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name' | grep -Fx "$file"
-          gh release upload "$GITHUB_REF_NAME" target/release/bundle/nsis/installer.json target/release/bundle/nsis/SHA256SUMS.txt --clobber
+          '{"bundle":{"createUpdaterArtifacts":true}}' | Out-File -Encoding ascii updater.conf.json
+          npx tauri build --bundles nsis --config updater.conf.json
 
       - name: Verify the Authenticode signature
         if: env.ZIRTOLA_SIGN_MODE != '' && env.ZIRTOLA_SIGN_MODE != 'none'
@@ -114,3 +115,32 @@ jobs:
           $sig = Get-AuthenticodeSignature $exe.FullName
           "$($exe.Name): $($sig.Status) $($sig.SignerCertificate.Subject)"
           if ($sig.Status -ne "Valid") { throw "Installer signature is $($sig.Status)" }
+
+      - name: Upload to the bucket (launcher/<version>/; the live pointer is not touched)
+        shell: bash
+        env:
+          LAUNCHER_BUCKET_ENDPOINT: ${{ secrets.LAUNCHER_BUCKET_ENDPOINT }}
+          LAUNCHER_BUCKET_NAME: ${{ secrets.LAUNCHER_BUCKET_NAME }}
+          LAUNCHER_BUCKET_REGION: ${{ secrets.LAUNCHER_BUCKET_REGION }}
+          LAUNCHER_BUCKET_ACCESS_KEY_ID: ${{ secrets.LAUNCHER_BUCKET_ACCESS_KEY_ID }}
+          LAUNCHER_BUCKET_SECRET_ACCESS_KEY: ${{ secrets.LAUNCHER_BUCKET_SECRET_ACCESS_KEY }}
+          LAUNCHER_BUCKET_PATH_STYLE: ${{ vars.LAUNCHER_BUCKET_PATH_STYLE }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          node scripts/launcher-bucket.mjs upload --version "$version"
+          node scripts/launcher-bucket.mjs list
+          {
+            echo "### Launcher $version uploaded"
+            echo ""
+            echo "Players don't have it yet. Test it, then make it live:"
+            echo "**Actions → Release → Run workflow → promote = \`$version\`**."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Internal archive only (needs repo access; deleted after 30 days).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zirtola-launcher-${{ github.ref_name }}
+          path: |
+            target/release/bundle/nsis/*-setup.exe
+            target/release/bundle/nsis/*-setup.exe.sig
+          retention-days: 30

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The launcher is for game owners only: downloaded from zirtola.com
+  (**Download Launcher**, signed in and owning a game) and updated from the
+  website's update feed with the launcher's sign-in. Releases go to the private
+  bucket (`scripts/launcher-bucket.mjs`: upload, promote, list; rollback =
+  promote an older version). Nothing is downloaded from GitHub any more.
 - **What it needs** screen: on the first start and before any launch where
   something is missing, one row per requirement (Windows 10 22H2+/11 64-bit,
   Microsoft Visual C++ Runtime 14.50+, DirectX 12 GPU with Shader Model 6 and

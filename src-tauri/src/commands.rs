@@ -696,11 +696,32 @@ pub struct LauncherUpdate {
     date: Option<String>,
 }
 
-#[tauri::command]
-pub async fn check_launcher_update(app: AppHandle) -> CmdResult<Option<LauncherUpdate>> {
-    let updater = app
-        .updater()
+/// The launcher's own update feed is on the website, for signed-in accounts
+/// that own a game: `{api_base}/v1/launcher/update`, with the launcher's
+/// access token. Signed out there is nothing to check (sign-in comes first:
+/// the launcher can't do anything without it). Every update is still verified
+/// with the updater public key built into the launcher.
+async fn launcher_updater(app: &AppHandle, state: &AppState) -> Result<Option<tauri_plugin_updater::Updater>, CmdError> {
+    if state.session.lock().await.is_none() {
+        return Ok(None);
+    }
+    let at = state.access_token().await?;
+    let endpoint = url::Url::parse(&format!("{}/v1/launcher/update", state.api.base()))
         .map_err(|e| CmdError::new("updater", e.to_string()))?;
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![endpoint])
+        .and_then(|b| b.header("Authorization", format!("Bearer {at}")))
+        .and_then(|b| b.build())
+        .map_err(|e| CmdError::new("updater", e.to_string()))?;
+    Ok(Some(updater))
+}
+
+#[tauri::command]
+pub async fn check_launcher_update(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Option<LauncherUpdate>> {
+    let Some(updater) = launcher_updater(&app, &state).await? else {
+        return Ok(None);
+    };
     match updater.check().await {
         Ok(Some(u)) => Ok(Some(LauncherUpdate {
             version: u.version.clone(),
@@ -720,9 +741,9 @@ pub async fn install_launcher_update(app: AppHandle, state: State<'_, AppState>)
             "Pause or finish downloads before updating the launcher.",
         ));
     }
-    let updater = app
-        .updater()
-        .map_err(|e| CmdError::new("updater", e.to_string()))?;
+    let Some(updater) = launcher_updater(&app, &state).await? else {
+        return Err(CmdError::new("signed_out", "Sign in to update the launcher."));
+    };
     let Some(update) = updater
         .check()
         .await

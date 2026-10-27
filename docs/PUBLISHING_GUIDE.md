@@ -114,6 +114,11 @@ Repo `trendlinepros-afk/zirtola-launcher` → **Settings → Secrets and variabl
 | --- | --- |
 | `TAURI_SIGNING_PRIVATE_KEY` | contents of `C:\Users\Wicked\.zirtola-launcher-secrets\updater.key` |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | contents of `updater.key.password` in the same folder |
+| `LAUNCHER_BUCKET_ENDPOINT` | the bucket's endpoint from its Credentials tab on Railway (e.g. `https://t3.storageapi.dev`) |
+| `LAUNCHER_BUCKET_NAME` | the bucket's `BUCKET` value (Credentials tab) |
+| `LAUNCHER_BUCKET_REGION` | `auto` |
+| `LAUNCHER_BUCKET_ACCESS_KEY_ID` | the bucket's access key id (Credentials tab) |
+| `LAUNCHER_BUCKET_SECRET_ACCESS_KEY` | the bucket's secret access key (Credentials tab) |
 | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` | from step 1.6 (when signing is ready) |
 
 **Variables** (Variables tab → New repository variable):
@@ -122,6 +127,7 @@ Repo `trendlinepros-afk/zirtola-launcher` → **Settings → Secrets and variabl
 | --- | --- |
 | `ZIRTOLA_API_BASE` | `https://www.zirtola.com/api/launcher` (optional: this is the built-in default; always `www`, the bare domain only forwards its front page) |
 | `ZIRTOLA_SIGN_MODE` | `azure` (only once step 1 is finished; leave unset before) |
+| `LAUNCHER_BUCKET_PATH_STYLE` | `true` only if the bucket's Credentials tab says path-style |
 | `AZURE_SIGNING_ENDPOINT` | the endpoint from step 1.8 |
 | `AZURE_SIGNING_ACCOUNT` | `zirtola-signing` |
 | `AZURE_SIGNING_PROFILE` | `zirtola-launcher` |
@@ -152,8 +158,8 @@ update before you can ship game builds.
 | `LAUNCHER_LAUNCH_SIGNING_KEY` | RAILWAY_VARIABLES.txt (secret) |
 | `LAUNCHER_MANIFEST_PUBLIC_KEYS` | RAILWAY_VARIABLES.txt |
 | `LAUNCHER_PUBLISH_TOKEN` | RAILWAY_VARIABLES.txt (secret) |
-| `LAUNCHER_CDN_URL_TEMPLATE` | `https://cdn.zirtola.com/{game}/chunks/{prefix}/{hash}` |
-| `LAUNCHER_DOWNLOAD_URL` | `https://github.com/trendlinepros-afk/zirtola-launcher/releases/latest` |
+| `LAUNCHER_CDN_URL_TEMPLATE` | `https://www.zirtola.com/api/launcher/v1/chunks/{game}/{prefix}/{hash}` |
+| `LAUNCHER_BUCKET_*` | references to the bucket (NEW_USER_TEST.md step A3) |
 | `LAUNCHER_OFFLINE_GRACE_DAYS` | `7` (how long a game runs offline) |
 | `LAUNCHER_DEACTIVATIONS_PER_PERIOD` / `LAUNCHER_DEACTIVATION_PERIOD_DAYS` | `3` / `30` |
 | `SUPPORT_EMAIL` | the address players write to if the installer looks different from the pictures (until set, the guide says "reply to any email from us") |
@@ -261,18 +267,20 @@ update. Then fix and release a new version number (never re-release the same num
 
 ### Shipping a launcher release
 
-From `E:\Game Development\Zirtola Launcher`:
+From `E:\Game Development\Zirtola Launcher`, on `main`:
 
-1. Write `release-notes\0.2.0.md` (see `release-notes\TEMPLATE.md`).
-2. `node scripts\release-launcher.mjs --version 0.2.0 --dry-run`, then without `--dry-run`.
-   It bumps the version, updates `CHANGELOG.md`, commits, tags `v0.2.0` and pushes the tag.
-3. GitHub → **Actions** shows "Release" running (about 15 minutes). When green:
-   GitHub → **Releases** → the draft **Zirtola Launcher v0.2.0** → check the installer
-   is attached (and signed: right-click the downloaded `.exe` → Properties → **Digital Signatures**) → **Publish release**.
-4. Installed launchers show "Launcher 0.2.0 · Restart to update" in the sidebar.
+1. Write `release-notes\0.2.1.md` (see `release-notes\TEMPLATE.md`).
+2. `node scripts\release-launcher.mjs --version 0.2.1 --dry-run`, then without `--dry-run`.
+   It bumps the version, updates `CHANGELOG.md`, commits, tags `v0.2.1` and pushes the tag.
+3. GitHub → **Actions** shows "Release" running (about 15 minutes). When green, the
+   new launcher is in the bucket under `launcher/0.2.1/` but **not live yet**.
+4. Make it live: **Actions → Release → Run workflow → promote = `0.2.1`**.
+   zirtola.com's **Download Launcher** serves it within a minute, and installed
+   launchers show "Launcher 0.2.1 · Restart to update".
 
-Rolling back a launcher release: GitHub → Releases → edit the bad release →
-**Set as a pre-release** (or delete it). `latest.json` then points at the previous release.
+Rolling back: run the same workflow with the previous version (e.g. `0.2.0`), or
+locally `node scripts\launcher-bucket.mjs promote --version 0.2.0`. Old versions stay
+in the bucket. How the live version is chosen is explained in `docs/RELEASING.md`.
 
 ---
 
@@ -332,4 +340,4 @@ These need your accounts, identity or money, so they're yours:
 3. Railway Storage Bucket and its website variables (Part 1.3, steps in NEW_USER_TEST.md A2–A5).
 4. GitHub secrets and variables (Part 1.4).
 5. Railway variables and merging the website PRs (Part 1.5).
-6. Optional: winget submission (`docs/DISTRIBUTION.md`).
+6. (winget isn't used: it needs a public download, and the launcher is for game owners only.)

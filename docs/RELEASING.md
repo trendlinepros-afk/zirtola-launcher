@@ -1,7 +1,9 @@
 # Releasing
 
-Two things get released: the **launcher** (GitHub Releases + auto-update feed)
-and **games** (chunk store on a CDN + signed manifest on the website).
+Two things get released: the **launcher** (installer + auto-update, in the
+private Railway bucket, served by zirtola.com to people who own a game) and
+**games** (chunk store in the same bucket + signed manifest on the website).
+Nothing is downloaded from GitHub; the repository can be private.
 
 ## One-time setup
 
@@ -19,10 +21,18 @@ npx tauri signer generate -w "$env:USERPROFILE\.zirtola-launcher-secrets\updater
 # then paste the contents of updater.key.pub into plugins.updater.pubkey
 ```
 
-Add GitHub Actions secrets:
+Add GitHub Actions secrets (Settings → Secrets and variables → Actions → New repository secret):
 
 - `TAURI_SIGNING_PRIVATE_KEY` = contents of `updater.key`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` = its password
+- `LAUNCHER_BUCKET_ENDPOINT` = the bucket's endpoint (e.g. `https://t3.storageapi.dev`)
+- `LAUNCHER_BUCKET_NAME` = the bucket's `BUCKET` value (Credentials tab on Railway)
+- `LAUNCHER_BUCKET_REGION` = `auto`
+- `LAUNCHER_BUCKET_ACCESS_KEY_ID` = its access key id
+- `LAUNCHER_BUCKET_SECRET_ACCESS_KEY` = its secret access key
+
+(Repository variable `LAUNCHER_BUCKET_PATH_STYLE` = `true` only if the bucket's
+Credentials tab says path-style.)
 
 **Back the key up** (password manager plus offline copy). If it is lost,
 existing installs can never auto-update again; users would have to download a
@@ -56,37 +66,55 @@ launch public key into each game, see GAME_INTEGRATION.md). On the website:
 
 ## Cutting a launcher release
 
-1. Bump `version` in `package.json` (Tauri reads it from there) and
-   `src-tauri/Cargo.toml`, add a CHANGELOG entry, commit.
-2. Tag and push:
-   ```bash
-   git tag v0.2.0
-   git push origin main v0.2.0
+1. Write `release-notes/<version>.md` (players see it in the launcher's update
+   prompt), then on `main`:
+
+   ```powershell
+   node scripts/release-launcher.mjs --version 0.2.1
    ```
-3. The **Release** workflow tests, builds the NSIS installer, Authenticode-signs
-   every binary (if configured), signs the updater bundle, and creates a
-   **draft** GitHub Release with:
-   - `Zirtola Launcher_0.2.0_x64-setup.exe` (link this from the website)
-   - `…-setup.exe.sig` (updater signature)
-   - `latest.json` (the update feed)
-   - `installer.json` and `SHA256SUMS.txt`: the setup file's published name,
-     URL and SHA-256 (made by `scripts/installer-info.mjs`). The website reads
-     `installer.json` from the latest release to show the checksum next to its
-     download button and to send that button straight to the file.
-4. Download the installer from the draft, install it on a clean Windows
-   machine or VM, sign in, install a game.
-5. Click **Publish release**. Installed launchers check
-   `https://github.com/trendlinepros-afk/zirtola-launcher/releases/latest/download/latest.json`
-   at start-up and offer the update (Settings → "Check for updates" checks on demand).
 
-The website's download buttons all go to `zirtola.com/download/launcher`, which
-redirects to the installer named in the latest release's `installer.json`
-(falling back to `LAUNCHER_DOWNLOAD_URL`). GitHub turns spaces in asset names
-into dots, so players download `Zirtola.Launcher_<version>_x64-setup.exe`;
-the release job checks that the uploaded asset has exactly that name.
+   It bumps `package.json`, `src-tauri/Cargo.toml` and `Cargo.lock`, folds the
+   CHANGELOG, commits, tags `v0.2.1` and pushes the tag (`--dry-run` first to
+   check).
+2. GitHub Actions → **Release** builds and signs on Windows (about 15 minutes)
+   and uploads to the bucket under `launcher/0.2.1/`: the installer (which is
+   also the update bundle), its `.sig` and `release.json`. **Players don't get
+   it yet.** The run's summary says so.
+3. Make it live: **Actions → Release → Run workflow → promote = `0.2.1`** (or
+   locally `node scripts/launcher-bucket.mjs promote --version 0.2.1`).
 
-A broken release can be pulled by deleting or re-drafting it: `latest.json`
-then resolves to the previous published release.
+### How the latest release is chosen
+
+The website never guesses: `zirtola.com/download/launcher` and the launcher's
+update feed read one small pointer in the bucket, `launcher/latest.json`, and
+serve exactly the version named there. A release uploads its files first and
+the pointer is written last, in a single upload, so a half-finished release is
+never served. Every version stays in the bucket, so rolling back is promoting
+the previous version (`node scripts/launcher-bucket.mjs list` shows what's
+there, `*` = live). The site picks up a new pointer within a minute, with no
+redeploy.
+
+### Who can download and update
+
+- `zirtola.com/download/launcher`: signed in **and** owning a game (bought,
+  key, studio grant or approved early access; refunds and revocations don't
+  count). Others are sent to sign in, or told the launcher comes with their
+  first game.
+- Launcher self-update: `{api_base}/v1/launcher/update` with the launcher's
+  access token, for accounts that own a game. A signed-out launcher doesn't
+  check (it can't do anything before sign-in, and it checks right after). The
+  update is still verified against `plugins.updater.pubkey`.
+- Launchers built before this change looked for updates on GitHub; none are in
+  players' hands. Test installs: uninstall and install again from
+  zirtola.com/download/launcher.
+
+### Cost with a private repository
+
+GitHub's free plan includes 2,000 Actions minutes a month for private repos,
+and Windows minutes count double. A launcher release is about 15 minutes of
+Windows (≈ 30 billed minutes); CI on a pull request is about 6–8 minutes of
+Windows (≈ 12–16 billed). Promote runs on Linux (≈ 1 minute). Roughly 50 PR
+pushes and a few releases a month fit in the free minutes.
 
 ## Publishing a game build
 

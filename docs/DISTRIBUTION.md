@@ -1,3 +1,8 @@
+> **Update:** the owner chose owner-only downloads: the launcher is served by
+> zirtola.com (signed in, owning a game) from the private bucket, so the winget
+> option below isn't used (winget needs a public download URL). The rest of
+> this research still applies.
+
 # Getting the launcher to players before we have a code-signing certificate
 
 **Question.** Can players on Windows get the Zirtola Launcher legitimately and

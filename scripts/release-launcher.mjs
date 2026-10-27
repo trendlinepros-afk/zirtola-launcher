@@ -8,13 +8,9 @@
 //
 // Pushing the tag starts .github/workflows/release.yml, which builds the
 // installer, Authenticode-signs it (once ZIRTOLA_SIGN_MODE is set), signs the
-// updater bundle with TAURI_SIGNING_PRIVATE_KEY and drafts a GitHub Release
-// whose text is release-notes/<version>.md. Publishing that draft is what makes
-// installed launchers update. See docs/PUBLISHING_GUIDE.md.
-import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+// updater bundle with TAURI_SIGNING_PRIVATE_KEY and uploads it to the private
+// bucket under launcher/<version>/. Promoting it (Actions -> Release -> Run
+// workflow, or scripts/launcher-bucket.mjs promote) makes zirtola.com serve it.
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const args = process.argv.slice(2);
@@ -101,17 +97,13 @@ if (flag("local-build")) {
   const dir = join(ROOT, "target", "release", "bundle", "nsis");
   const setup = readdirSync(dir).find((f) => f.endsWith(`${version}_x64-setup.exe`));
   if (!setup || !existsSync(join(dir, `${setup}.sig`))) fail("No signed setup .exe found");
-  const feed = {
-    version,
-    notes: body,
-    pub_date: new Date().toISOString(),
-    platforms: { "windows-x86_64": { signature: readFileSync(join(dir, `${setup}.sig`), "utf8").trim(), url: process.env.UPDATE_BASE_URL ? `${process.env.UPDATE_BASE_URL.replace(/\/$/, "")}/${encodeURIComponent(setup)}` : setup } },
-  };
-  writeFileSync(join(dir, "latest.json"), JSON.stringify(feed, null, 2));
-  // installer.json + SHA256SUMS.txt for the website's download page.
-  const info = spawnSync("node", ["scripts/installer-info.mjs", "--dir", dir, "--version", version, ...(process.env.UPDATE_BASE_URL ? ["--base-url", process.env.UPDATE_BASE_URL] : [])], { cwd: ROOT, stdio: "inherit" });
-  if (info.status !== 0) fail("installer-info failed");
-  log(`built ${join(dir, setup)} and latest.json`);
+  log(`built and signed ${join(dir, setup)}`);
+  // --upload: put it in the bucket under launcher/<version>/ (pointer untouched),
+  // with %USERPROFILE%\.zirtola-launcher-secrets\railway-bucket.json.
+  if (flag("upload")) {
+    const up = spawnSync("node", ["scripts/launcher-bucket.mjs", "upload", "--version", version, "--dir", dir], { cwd: ROOT, stdio: "inherit" });
+    if (up.status !== 0) fail("upload failed");
+  }
 }
 
 // 4. Commit, tag, push the tag (CI does the rest).
@@ -123,7 +115,8 @@ if (!flag("no-git")) {
     log(`pushing tag v${version} (and the current branch)`);
     git("push", "origin", "HEAD");
     git("push", "origin", `v${version}`);
-    log("CI is building the release. When it finishes, open GitHub → Releases, check the draft and click Publish.");
+    log("GitHub Actions is building and uploading it to the bucket (players don't get it yet).");
+    log(`When it's green: Actions → Release → Run workflow → promote = ${version}. Or locally: node scripts/launcher-bucket.mjs promote --version ${version}`);
   } else {
     log(`tagged v${version} locally; push with: git push origin HEAD v${version}`);
   }

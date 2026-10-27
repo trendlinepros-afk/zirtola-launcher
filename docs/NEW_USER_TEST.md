@@ -95,21 +95,30 @@ The build is already packaged and signed in `E:\Game Development\DirtDigger-Buil
    `"latest_version":"0.2.0"` for `dirt-simulator`. On the bucket's **Files** tab
    you should see a `dirt-simulator/chunks/` folder.
 
-### A6. Release the launcher (first public installer)
+### A6. Release the launcher to the bucket (never GitHub)
 
-The release workflow signs the launcher's auto-updates with your updater key.
-GitHub needs that key once.
+The launcher is built and signed on GitHub Actions and uploaded to the same
+bucket as the game. GitHub never hosts a download, so the repository can be
+private. GitHub needs six secrets once:
 
 1. <https://github.com/trendlinepros-afk/zirtola-launcher> → **Settings** →
-   **Secrets and variables** → **Actions** → **New repository secret**:
-   - Name `TAURI_SIGNING_PRIVATE_KEY`; value: open
-     `C:\Users\Wicked\.zirtola-launcher-secrets\updater.key` in Notepad, select
-     all, copy, paste. **Add secret**.
-   - Name `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; value: the contents of
-     `updater.key.password`. **Add secret**.
-   (Leave `ZIRTOLA_SIGN_MODE` unset until the Azure code-signing certificate is
+   **Secrets and variables** → **Actions** → **New repository secret**, one by one:
+
+   | Name | Value |
+   | --- | --- |
+   | `TAURI_SIGNING_PRIVATE_KEY` | open `C:\Users\Wicked\.zirtola-launcher-secrets\updater.key` in Notepad, select all, copy, paste |
+   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the contents of `updater.key.password` |
+   | `LAUNCHER_BUCKET_ENDPOINT` | from the bucket's **Credentials** tab on Railway (e.g. `https://t3.storageapi.dev`) |
+   | `LAUNCHER_BUCKET_NAME` | the `BUCKET` value from the Credentials tab |
+   | `LAUNCHER_BUCKET_REGION` | `auto` |
+   | `LAUNCHER_BUCKET_ACCESS_KEY_ID` | the access key id from the Credentials tab |
+   | `LAUNCHER_BUCKET_SECRET_ACCESS_KEY` | the secret access key from the Credentials tab |
+
+   Only if the Credentials tab says **path style**: **Variables** tab → **New
+   repository variable** `LAUNCHER_BUCKET_PATH_STYLE` = `true`.
+   Leave `ZIRTOLA_SIGN_MODE` unset until the Azure code-signing certificate is
    ready: the installer is unsigned for now, so Windows shows the SmartScreen
-   notice. That's expected, and Part B checks it.)
+   notice. That's expected, and Part B checks it.
 2. In Terminal:
 
    ```powershell
@@ -120,15 +129,28 @@ GitHub needs that key once.
    git push origin v0.2.0
    ```
 
-3. GitHub → **Actions** → **Release** runs (about 15–20 minutes). When it's green:
-   **Releases** → the draft **Zirtola Launcher v0.2.0**. Its assets should include
-   `Zirtola.Launcher_0.2.0_x64-setup.exe`, `….exe.sig`, `latest.json`,
-   `installer.json` and `SHA256SUMS.txt`.
-4. Click **Edit** (pencil) → **Publish release**.
-5. Check: <https://www.zirtola.com/download/launcher> downloads
+3. GitHub → **Actions** → **Release** runs (about 15 minutes). When it's green its
+   summary says "Launcher 0.2.0 uploaded. Players don't have it yet".
+4. Make it live: **Actions** → **Release** → **Run workflow** → **promote** =
+   `0.2.0` → **Run workflow**. About a minute later that run is green: the bucket's
+   pointer `launcher/latest.json` now names 0.2.0.
+5. Check, signed in to zirtola.com as **your** account (it owns the game):
+   **Download Launcher** at the top of the site downloads
    `Zirtola.Launcher_0.2.0_x64-setup.exe`, and
-   <https://www.zirtola.com/help/installing-on-windows> shows its SHA-256 (the
-   website caches it for up to an hour).
+   <https://www.zirtola.com/help/installing-on-windows> shows its SHA-256.
+
+**How the latest release is chosen:** the site and the launcher's update check
+only ever read the pointer `launcher/latest.json` in the bucket, so they serve
+exactly the version you last promoted. Each release's files are uploaded first
+and the pointer moves last, so a half-uploaded release is never served. Old
+versions stay in the bucket; to roll back, run **promote** with the older
+version. The site picks up a change within a minute; no redeploy.
+
+**When the repository can go private:** once this is merged, the Release run in
+step 3 has uploaded 0.2.0 and step 4 has promoted it. From then on nothing
+players use comes from GitHub. (Launchers built before this change checked
+GitHub for updates; none are with players. Uninstall any test install and
+install again from zirtola.com.)
 
 ### A7. Give the test account a licence (buying is still "Coming soon")
 
@@ -155,9 +177,10 @@ sign-in information → Add a user without a Microsoft account** → name `Teste
 
 | Step | Do | You should see |
 | --- | --- | --- |
-| B1 | Open Edge, go to **www.zirtola.com/games/dirt-digger**. | Dirt Digger page: $19.99, **Purchase** greyed out with **Coming soon**, "Still in development" notice, System requirements section. |
-| B2 | Under the price, click **Get the Zirtola Launcher** (or open www.zirtola.com/download/launcher). | Edge downloads `Zirtola.Launcher_0.2.0_x64-setup.exe` (about 3.7 MB). Edge may say it "isn't commonly downloaded": **…** → **Keep** → **Keep anyway**. |
-| B3 | Before running it: in another tab, **Join** on zirtola.com and create a new account (e.g. `tester-<date>`), confirm the email. Then do **Part A7** from your admin account in a private window to give it a licence. | The test account exists and has a Dirt Digger licence. |
+| B1 | Open Edge, go to **www.zirtola.com/games/dirt-digger**. | Dirt Digger page: $19.99, **Purchase** greyed out with **Coming soon**, "Still in development" notice, System requirements section. There is **no** launcher link in the price box (players get it with a game). |
+| B2 | Click **Download Launcher** at the top of the site while signed out. | You're sent to **Sign in**. Click **Join** and create a new account (e.g. `tester-<date>`); confirm the email. |
+| B3 | Signed in as the new account, click **Download Launcher** again. | "The launcher comes with your first game", with **See the games** and **Redeem a key**. No file downloads. Now do **Part A7** from your admin account (a private window) to give this account a licence. |
+| B3b | Click **Download Launcher** once more. | Edge downloads `Zirtola.Launcher_0.2.0_x64-setup.exe` (about 3.7 MB) from zirtola.com's download storage. Edge may say it "isn't commonly downloaded": **…** → **Keep** → **Keep anyway**. |
 | B4 | Open the downloaded installer. | Blue **Windows protected your PC**. Click **More info**: App = `Zirtola.Launcher_0.2.0_x64-setup.exe`, Publisher = **Unknown publisher**. Click **Run anyway**. (The same screens as on www.zirtola.com/help/installing-on-windows.) |
 | B5 | Installer: **Next** → keep the folder → **Install** → **Finish**. | No administrator prompt (it installs for this Windows user only). The launcher opens: "Sign in to Zirtola". |
 | B6 | **Sign in with your browser**. | Edge opens zirtola.com: sign in as the test account, then **Sign in to the launcher**. The page says "You're signed in". Back in the launcher: Dirt Digger in the library, "Granted by the studio", **Install**. A short "Checking for updates…" line may show at the top. |

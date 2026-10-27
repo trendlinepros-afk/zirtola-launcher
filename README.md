@@ -50,7 +50,8 @@ the website), and download, update, verify and play the games they own.
   folder) the player is asked whether to send the log, crash context and
   minidump with an optional comment. Games can also report directly
   (CrashReportClient or a small upload), see docs/GAME_INTEGRATION.md.
-- **Self-update** from GitHub Releases (`latest.json`), offered in the sidebar.
+- **Self-update** from zirtola.com (signed-in game owners only; the installer and
+  updates live in the private Railway bucket, never on GitHub), offered in the sidebar.
 - **Controller-friendly**: D-pad/stick move focus, A select, B back, LB/RB
   switch game, Start play/install, Y redeem key, View settings; button hints
   appear when a gamepad is used. Arrow keys work too.
@@ -67,7 +68,7 @@ the website), and download, update, verify and play the games they own.
 | Installer | **3.3 MB** NSIS (uses the WebView2 already in Windows 10/11) | 80–100 MB (ships Chromium + Node) |
 | Memory at idle | ~40–80 MB | 150–300 MB |
 | Big resumable downloads | Native Rust: tokio, positional writes, SHA-256 with CPU extensions, no GC pauses | Node streams; workable but slower hashing and more memory |
-| Auto-update | Official updater plugin, minisign-signed feed, GitHub Releases | electron-updater, similar |
+| Auto-update | Official updater plugin, minisign-signed feed (served by our website) | electron-updater, similar |
 | Security | No Node in the renderer; the UI can only call the commands we register; strict CSP | Must lock down Node integration / preload carefully |
 | Code signing | `signCommand` hook signs every binary (Azure Artifact Signing, OV, EV) | Similar via electron-builder |
 
@@ -174,15 +175,16 @@ signing (~$150–400/year). EV no longer skips SmartScreen (since March 2024).
 ## Distribution without a certificate yet
 
 See **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)**: which channels are
-legitimate before we have a code-signing certificate (website + winget now,
-signing as soon as possible), and why the Microsoft Store, a zip or a
-bootstrapper do not work for this launcher.
+legitimate before we have a code-signing certificate, and why the Microsoft
+Store, a zip or a bootstrapper do not work for this launcher. The launcher is
+now only for game owners: zirtola.com/download/launcher, signed in (so winget,
+which needs a public download, isn't used).
 
 ## Releasing
 
 See **[docs/RELEASING.md](docs/RELEASING.md)**: push a `vX.Y.Z` tag, GitHub
-Actions builds, signs and drafts the release with the installer and
-`latest.json`; publish the draft to ship the update. The same document covers
+Actions builds, signs and uploads it to the private bucket; "promote" makes it
+the version zirtola.com serves (and rolls back). The same document covers
 publishing game builds (`zirtola-publish` → CDN → website).
 
 ## Integrating a game

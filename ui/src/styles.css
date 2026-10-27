@@ -299,3 +299,12 @@ textarea.text.comment { width: 100%; height: auto; padding: 10px 12px; resize: v
 .req-done p { margin: 0; }
 .ok-text { color: var(--ok); font-weight: 700; }
 .disabled-wrap { display: inline-flex; }
+
+/* Update prompts (updates.ts): required updates are red and have no Later. */
+.update-prompt .changelog { max-height: 46vh; overflow: auto; }
+.required-banner { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; margin-bottom: 10px; border-radius: 10px; background: rgba(224, 87, 79, .14); border: 1px solid rgba(224, 87, 79, .55); color: #ffc9c4; font-weight: 600; }
+.required-banner .ico { flex: none; width: 18px; height: 18px; color: var(--danger); }
+.pill.required { background: rgba(224, 87, 79, .16); border-color: rgba(224, 87, 79, .55); color: #ffb0a9; }
+.pill.update.required:hover { background: rgba(224, 87, 79, .26); }
+.update-card.required { border-color: rgba(224, 87, 79, .6); background: #2c1513; color: #ffc9c4; }
+.update-card.required small { color: #f09a92; }

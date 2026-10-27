@@ -33,3 +33,19 @@ test("paragraphs wrap and blank lines separate blocks", () => {
     { kind: "ul", items: ["b"] },
   ]);
 });
+
+test("section headings without '#' start their own section, even right after a bullet", () => {
+  const md = "New\n- Wash plant chain lift and trailer straps.\n- Gold buyer in town.\nChanged\n- Save files move to format 4 (old saves upgrade on first load).\n\n**Fixes:**\n- The dozer blade no longer sticks.\nKnown issues\n- Rain looks dark at dawn.";
+  assert.deepEqual(parseNotes(md), [
+    { kind: "h", text: "New" },
+    { kind: "ul", items: ["Wash plant chain lift and trailer straps.", "Gold buyer in town."] },
+    { kind: "h", text: "Changed" },
+    { kind: "ul", items: ["Save files move to format 4 (old saves upgrade on first load)."] },
+    { kind: "h", text: "Fixes" },
+    { kind: "ul", items: ["The dozer blade no longer sticks."] },
+    { kind: "h", text: "Known issues" },
+    { kind: "ul", items: ["Rain looks dark at dawn."] },
+  ]);
+  // A wrapped line that merely starts with such a word still joins its bullet.
+  assert.deepEqual(parseNotes("- The buyer pays more for\nnew gold."), [{ kind: "ul", items: ["The buyer pays more for new gold."] }]);
+});

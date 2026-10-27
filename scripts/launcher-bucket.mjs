@@ -12,7 +12,7 @@
 // last, in one PUT, so a half-finished upload is never served. Old versions
 // stay, so rolling back is `promote <older version>`.
 //
-//   node scripts/launcher-bucket.mjs upload  --version 0.2.1 [--dir target/release/bundle/nsis] [--notes release-notes/0.2.1.md]
+//   node scripts/launcher-bucket.mjs upload  --version 0.2.1 [--dir target/release/bundle/nsis] [--notes release-notes/0.2.1.md] [--mandatory "Security fix"]
 //   node scripts/launcher-bucket.mjs promote --version 0.2.1     # make it the one players get (or roll back)
 //   node scripts/launcher-bucket.mjs list                        # versions in the bucket, * = current
 //   node scripts/launcher-bucket.mjs current
@@ -55,6 +55,10 @@ async function upload() {
   const file = local.replace(/ /g, ".");
   const data = readFileSync(join(dir, local));
   const notesFile = arg("notes", `release-notes/${version}.md`);
+  const notesText = existsSync(notesFile) ? readFileSync(notesFile, "utf8") : "";
+  // A "Mandatory: <reason>" line in the notes (or --mandatory "<reason>") makes
+  // it a required update; the line itself isn't shown to players.
+  const notesMandatory = /^Mandatory:\s*(.*)$/im.exec(notesText);
   const rel = {
     version,
     file,
@@ -62,8 +66,12 @@ async function upload() {
     sha256: createHash("sha256").update(data).digest("hex"),
     size: statSync(join(dir, local)).size,
     signature: readFileSync(sigFile, "utf8").trim(),
-    notes: existsSync(notesFile) ? readFileSync(notesFile, "utf8").trim() : "",
+    notes: notesText.replace(/^Mandatory:.*$\n?/im, "").trim(),
     pub_date: new Date().toISOString(),
+    // --mandatory "<reason>": installed launchers can't postpone this update.
+    ...(rest.includes("--mandatory") || notesMandatory
+      ? { mandatory: true, mandatory_reason: (rest.includes("--mandatory") && !String(arg("mandatory", "") ?? "").startsWith("--") ? String(arg("mandatory", "")) : notesMandatory?.[1] ?? "").trim().slice(0, 200) }
+      : {}),
   };
   const b = bucket();
   console.log(`launcher-bucket: uploading ${version} to ${b.bucket} (pointer unchanged)`);

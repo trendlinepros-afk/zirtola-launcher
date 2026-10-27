@@ -94,6 +94,27 @@ the previous version (`node scripts/launcher-bucket.mjs list` shows what's
 there, `*` = live). The site picks up a new pointer within a minute, with no
 redeploy.
 
+### Update prompts and required releases
+
+Installed launchers show a window with the release notes and **Update now** /
+**Later** when the pointer moves to a newer version (or update silently if the
+player turned on automatic launcher updates). To make a launcher release
+**required** (no Later, the reason is shown), upload it with
+`--mandatory "<reason>"`, or put a `Mandatory: <reason>` line in
+`release-notes/<version>.md` (the line itself isn't shown to players):
+
+```powershell
+node scripts/launcher-bucket.mjs upload --version 0.3.0 --mandatory "Security fix"
+```
+
+Games work the same way: tick **Required** and give a reason next to the build
+in Studio → Licensing → Launcher catalogue → the game, or publish with
+`node Tools/release/release.mjs ... --mandatory "<reason>"` from the game repo.
+An install older than the newest required release (at or below the live one)
+gets the prompt without Later, Play stays disabled, and the website refuses
+its launch token (HTTP 426 `update_required`), also when a newer, optional
+release is live. Screenshots: `docs/screenshots/update-prompt-*.png`.
+
 ### Who can download and update
 
 - `zirtola.com/download/launcher`: signed in **and** owning a game (bought,

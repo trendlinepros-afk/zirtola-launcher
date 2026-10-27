@@ -5,6 +5,19 @@
 
 export type NotesBlock = { kind: "h"; text: string } | { kind: "p"; text: string } | { kind: "ul"; items: string[] };
 
+// Section names release notes use without "#": a line that is only one of
+// these (optionally bold, optionally with a colon) is a heading, even straight
+// after a bullet, never a wrapped continuation of it.
+const SECTIONS =
+  /^\s*(?:\*\*|__)?\s*(new|added|changed|changes|fixed|fixes|bug fixes|removed|improved|improvements|balance|performance|security|deprecated|known issues|notes?)\s*:?\s*(?:\*\*|__)?\s*:?\s*$/i;
+
+function sectionHeading(line: string): [string, string] | null {
+  const m = SECTIONS.exec(line);
+  if (!m) return null;
+  const word = m[1]!.trim();
+  return [line, word.charAt(0).toUpperCase() + word.slice(1)];
+}
+
 export function parseNotes(md: string): NotesBlock[] {
   const out: NotesBlock[] = [];
   let open: NotesBlock | null = null; // paragraph or list still taking lines
@@ -23,7 +36,7 @@ export function parseNotes(md: string): NotesBlock[] {
       open.items.push(item[1]!.trim());
       continue;
     }
-    const head = /^#{1,6}\s+(.*)$/.exec(line);
+    const head = /^#{1,6}\s+(.*)$/.exec(line) ?? sectionHeading(line);
     if (head) {
       out.push({ kind: "h", text: head[1]!.trim() });
       open = null;

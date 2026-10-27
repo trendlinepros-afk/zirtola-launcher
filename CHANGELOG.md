@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **What it needs** screen: on the first start and before any launch where
+  something is missing, one row per requirement (Windows 10 22H2+/11 64-bit,
+  Microsoft Visual C++ Runtime 14.50+, DirectX 12 GPU with Shader Model 6 and
+  its driver, free disk space) with a green tick or a red cross, what it is
+  and what was found. Missing runtime: "Install the missing components" lists
+  what and how big, asks first, installs with progress (Retry and a Microsoft
+  link on failure) and re-checks. The installer is the copy Unreal ships in
+  the game (verified against the signed manifest) or Microsoft's download,
+  and must carry Microsoft's Authenticode signature. Play stays disabled with
+  the reason while something required is red; GPU, Windows and disk problems
+  show advice and links. DEV builds: ZIRTOLA_PREREQ_SIMULATE /
+  ZIRTOLA_PREREQ_SIMULATE_FAIL.
+
 ## 0.2.0
 
 - The launcher talks to https://www.zirtola.com (the bare zirtola.com only forwards

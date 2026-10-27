@@ -61,6 +61,17 @@ export interface ActiveDevice {
   last_seen_at: string;
 }
 
+export type { PrereqItem } from "./requirements";
+import type { PrereqItem } from "./requirements";
+
+export interface PrereqProgress {
+  id: string;
+  phase: "download" | "verify" | "install" | "done" | "error";
+  done: number;
+  total: number;
+  message?: string | null;
+}
+
 export interface LicenseInfo {
   game_id: string;
   game_title: string;
@@ -164,6 +175,8 @@ export const api = {
   verify: (gameId: string) => invoke<void>("verify_game", { gameId }),
   uninstall: (gameId: string) => invoke<void>("uninstall_game", { gameId }),
   deleteGameSaves: (gameId: string) => invoke<string>("delete_game_saves", { gameId }),
+  prereqsCheck: (gameId: string | null, needBytes: number | null) => invoke<PrereqItem[]>("prereqs_check", { gameId, needBytes }),
+  prereqsInstall: (ids: string[], gameId: string | null) => invoke<void>("prereqs_install", { ids, gameId }),
   resolveSaveLocation: (raw: string) => invoke<string>("resolve_save_location", { raw }),
   pause: (gameId: string) => invoke<void>("pause_job", { gameId }),
   forget: (gameId: string) => invoke<void>("forget_install", { gameId }),
@@ -217,6 +230,10 @@ export function onGameCrashed(cb: (c: CrashCandidate) => void): Promise<Unlisten
 
 export function onDeepLink(cb: (url: string) => void): Promise<UnlistenFn> {
   return listen<string>("deep-link", (e) => cb(e.payload));
+}
+
+export function onPrereqProgress(cb: (p: PrereqProgress) => void) {
+  return listen<PrereqProgress>("prereq-progress", (e) => cb(e.payload));
 }
 
 export function onLauncherUpdateProgress(cb: (p: { downloaded: number; total: number | null }) => void) {

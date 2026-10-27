@@ -6,6 +6,7 @@ mod crash;
 mod hardware;
 mod jobs;
 mod playtime;
+mod prereqs;
 mod reports;
 mod saves;
 mod state;
@@ -87,6 +88,8 @@ pub fn run() {
             commands::game_changelog,
             commands::game_license,
             commands::delete_game_saves,
+            commands::prereqs_check,
+            commands::prereqs_install,
             commands::resolve_save_location,
             commands::set_branch,
             commands::hardware_report,

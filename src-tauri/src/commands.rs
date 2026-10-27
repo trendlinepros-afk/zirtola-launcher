@@ -618,8 +618,10 @@ pub fn open_url(url: String) -> CmdResult<()> {
     if !matches!(u.scheme(), "https" | "http") {
         return Err(CmdError::new("bad_url", "Only web links can be opened."));
     }
-    if dev_mode() && std::env::var_os("ZIRTOLA_NO_BROWSER").is_some() {
-        // Automated tests read the URL from the log; a person sees why nothing opened.
+    // Debug builds only: automated tests switch the browser off and read the
+    // URL from the log. Compiled out of release builds, which always open it.
+    #[cfg(debug_assertions)]
+    if std::env::var_os("ZIRTOLA_NO_BROWSER").is_some() {
         eprintln!("ZIRTOLA_OPEN_URL={u}");
         return Err(CmdError::new(
             "browser_suppressed",
@@ -744,4 +746,54 @@ pub fn cancel_all_jobs(app: &AppHandle) -> bool {
         j.cancel.cancel();
     }
     !jobs.is_empty()
+}
+
+// ---------------------------------------------------------------- requirements (prereqs.rs)
+
+/// What a game needs on this PC, one row per item. With a game id, the disk
+/// check uses its download size and the VC++ installer it ships.
+#[tauri::command]
+pub async fn prereqs_check(state: State<'_, AppState>, game_id: Option<String>, need_bytes: Option<u64>) -> CmdResult<Vec<crate::prereqs::Item>> {
+    let input = prereq_input(&state, game_id.as_deref(), need_bytes).await;
+    Ok(tauri::async_runtime::spawn_blocking(move || crate::prereqs::check(&input))
+        .await
+        .map_err(|e| CmdError::new("prereqs", e.to_string()))?)
+}
+
+/// Install the given items (only after the player said yes on the
+/// requirements screen). Progress arrives as "prereq-progress" events.
+#[tauri::command]
+pub async fn prereqs_install(app: AppHandle, state: State<'_, AppState>, ids: Vec<String>, game_id: Option<String>) -> CmdResult<()> {
+    let input = prereq_input(&state, game_id.as_deref(), None).await;
+    for id in ids {
+        let handle = app.clone();
+        let r = crate::prereqs::install(&id, &state.dl_http, input.game_root.clone(), move |p| {
+            let _ = handle.emit("prereq-progress", &p);
+        })
+        .await;
+        if let Err(message) = r {
+            let _ = app.emit(
+                "prereq-progress",
+                &crate::prereqs::Progress { id: id.clone(), phase: "error", done: 0, total: 0, message: Some(message.clone()) },
+            );
+            return Err(CmdError::new("prereq_failed", message));
+        }
+    }
+    Ok(())
+}
+
+async fn prereq_input(state: &AppState, game_id: Option<&str>, need_bytes: Option<u64>) -> crate::prereqs::CheckInput {
+    let rec = match game_id {
+        Some(id) if valid_game_id(id) => state.registry.lock().await.get(id).cloned(),
+        _ => None,
+    };
+    let installed = rec.as_ref().is_some_and(|r| install::installed_manifest(&r.path).ok().flatten().is_some());
+    crate::prereqs::CheckInput {
+        need_bytes: if installed { 0 } else { need_bytes.unwrap_or(0) },
+        install_dir: match &rec {
+            Some(r) => r.path.clone(),
+            None => state.settings.lock().await.library_dir.clone(),
+        },
+        game_root: rec.filter(|_| installed).map(|r| r.path),
+    }
 }

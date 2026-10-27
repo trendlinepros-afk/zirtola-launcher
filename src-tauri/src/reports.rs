@@ -130,9 +130,11 @@ pub fn watch_game(
     m: Manifest,
     title: String,
     user_id: Option<String>,
+    play_session_id: String,
 ) {
-    let tracker = user_id
-        .map(|uid| crate::playtime::start(app.clone(), uid, m.game_id.clone(), root.clone()));
+    let tracker = user_id.map(|uid| {
+        crate::playtime::start(app.clone(), uid, m.game_id.clone(), root.clone(), play_session_id)
+    });
     let roots = crash::crash_roots(&root, &m);
     let before: std::collections::HashSet<String> = crash::list_crash_dirs(&roots)
         .into_iter()

@@ -14,6 +14,7 @@ When the launcher starts a game it:
 | `ZIRTOLA_GAME_ID` | e.g. `dirt-simulator` |
 | `ZIRTOLA_GAME_VERSION` | installed version, e.g. `1.2.0` |
 | `ZIRTOLA_API_BASE` | e.g. `https://www.zirtola.com/api/launcher` |
+| `ZIRTOLA_PLAY_SESSION_ID` | the launcher's playtime id for this run (career stats, see `docs/GAME_STATS_API.md`) |
 
 The token goes in the environment, not the command line, so it does not show
 up in process listings or crash reports.
@@ -130,6 +131,12 @@ Unreal has no Ed25519 built in. Two small, permissively licensed options:
 files (`crypto_ed25519_check`), or libsodium (`crypto_sign_verify_detached`).
 When the website rotates the launch key, ship the new public key in a patch
 before the old one is retired (keys carry a `kid`, so a game can pin several).
+
+## Career stats (gold mined)
+
+The game reports career stats (Dirt Digger: gold mined and recovered) to the
+website with the same launch token. Endpoint, batching, offline queue and an
+Unreal example: [`docs/GAME_STATS_API.md`](GAME_STATS_API.md).
 
 ## Crash reports
 

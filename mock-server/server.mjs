@@ -44,6 +44,13 @@ const deviceCodes = new Map(); // device_code -> { user_code, account|null, exp,
 const activations = {}; // "<account>:<game>" -> Map(device_id -> { name, last })
 const hardware = {}; // "<account>:<device_id>" -> last hardware report (in memory)
 const playtime = {}; // "<account>" -> { "<session_id>": report } (in memory, same rules as the website)
+// Career stats from games (docs/GAME_STATS_API.md), in memory, same rules as
+// the website: "<account>:<game>" -> { mined_mg, recovered_mg, held_mg }, and
+// runs by launch-token jti -> { seqs: Map(seq -> result), mined_mg, claimed }.
+const careers = {};
+const statRuns = {};
+const GOLD_GPH = +(process.env.MOCK_GOLD_MAX_GRAMS_PER_HOUR || 50);
+const GOLD_BURST_G = 5;
 
 function playtimeTotals(acct) {
   const by = {};
@@ -86,6 +93,66 @@ function loadManifest(gameId, version) {
   const env = readJson(manifestPath(gameId, version), null);
   if (!env) return null;
   return { env, m: JSON.parse(Buffer.from(env.manifest, "base64url").toString("utf8")) };
+}
+
+// ------------------------------------------------------------------ career stats (from the game)
+
+async function gameStats(req, res, gid) {
+  const h = req.headers.authorization || "";
+  const claims = h.startsWith("Bearer ") ? verifyJwt(h.slice(7), launchKey) : null;
+  if (!claims || claims.game !== gid || claims.aud !== `zirtola-game:${gid}`) return err(res, 401, "unauthorized", "Launch token is not valid.");
+  if (claims.iat > now() + 120) return err(res, 401, "unauthorized", "Launch token was issued in the future.");
+  if (now() > claims.iat + 30 * 86400) return err(res, 401, "session_expired", "This game session is too old to report (30 days).");
+  if (!owns(claims.sub, gid)) return err(res, 403, "not_entitled", "This account does not own the game.");
+  const ck = `${claims.sub}:${gid}`;
+  const career = (careers[ck] ||= { mined_mg: 0, recovered_mg: 0, held_mg: 0 });
+  const careerJson = () => ({
+    game_id: gid,
+    gold_mined_g: career.mined_mg / 1000,
+    gold_mined_ozt: +(career.mined_mg / 1000 / 31.1034768).toFixed(6),
+    gold_recovered_g: career.recovered_mg / 1000,
+    gold_recovered_ozt: +(career.recovered_mg / 1000 / 31.1034768).toFixed(6),
+  });
+  if (req.method === "GET") return send(res, 200, { career: careerJson() });
+  if (req.method !== "POST") return err(res, 404, "not_found");
+  const body = await readBody(req);
+  if (!Array.isArray(body.reports) || !body.reports.length || body.reports.length > 50) return err(res, 400, "bad_request", "Expected { reports: [ … ] } (1–50).");
+  const run = (statRuns[claims.jti] ||= { seqs: new Map(), mined_mg: 0, recovered_mg: 0, held_mg: 0, claimed: 0, allowed: 0, ps: null });
+  if (!run.ps && typeof body.play_session_id === "string") run.ps = body.play_session_id;
+  const cap = (secs) => Math.round((GOLD_GPH * secs / 3600 + GOLD_BURST_G) * 1000);
+  const order = body.reports.map((rep, i) => ({ rep, i })).sort((a, b) => (+a.rep?.seq || 0) - (+b.rep?.seq || 0));
+  const results = new Array(body.reports.length);
+  for (const { rep, i } of order) {
+    const seq = rep?.seq;
+    const mined = rep?.gold_mined_g ?? 0, recovered = rep?.gold_recovered_g ?? 0, active = rep?.active_seconds;
+    if (!Number.isInteger(seq) || seq < 1 || seq > 1e6 || typeof mined !== "number" || typeof recovered !== "number" || mined < 0 || recovered < 0 || mined > 1000 || recovered > 1000 || !Number.isInteger(active) || active < 0) {
+      results[i] = { seq: Number.isInteger(seq) ? seq : null, status: "rejected", error: "bad_request", message: "Bad report values." };
+      continue;
+    }
+    if (run.seqs.has(seq)) {
+      results[i] = { ...run.seqs.get(seq), status: "duplicate" };
+      continue;
+    }
+    run.claimed = Math.max(run.claimed, Math.min(active, 48 * 3600));
+    let allowed = Math.min(run.claimed, now() - claims.iat + 120, 48 * 3600);
+    const ps = run.ps && playtime[claims.sub]?.[run.ps];
+    if (ps) allowed = Math.min(allowed, ps.active_seconds + 600);
+    run.allowed = Math.max(run.allowed, allowed);
+    const minedMg = Math.round(mined * 1000), recoveredMg = Math.round(recovered * 1000);
+    const accM = Math.min(minedMg, Math.max(0, cap(allowed) - run.mined_mg));
+    const accR = Math.min(recoveredMg, Math.max(0, career.mined_mg + accM + GOLD_BURST_G * 1000 - career.recovered_mg));
+    run.mined_mg += accM; run.recovered_mg += accR; run.held_mg += minedMg - accM + recoveredMg - accR;
+    career.mined_mg += accM; career.recovered_mg += accR; career.held_mg += minedMg - accM + recoveredMg - accR;
+    const out = { seq, status: accM < minedMg || accR < recoveredMg ? "capped" : "accepted", accepted_mined_g: accM / 1000, accepted_recovered_g: accR / 1000, held_mined_g: (minedMg - accM) / 1000, held_recovered_g: (recoveredMg - accR) / 1000 };
+    run.seqs.set(seq, out);
+    results[i] = out;
+    console.log(`[mock] stats ${claims.sub} ${gid} run ${claims.jti} #${seq}: +${mined} g mined, +${recovered} g recovered, ${active}s active -> ${out.status}`);
+  }
+  return send(res, 200, {
+    results,
+    session: { allowed_seconds: run.allowed, gold_mined_g: run.mined_mg / 1000, gold_recovered_g: run.recovered_mg / 1000, held_g: run.held_mg / 1000, cap_g: cap(run.allowed) / 1000 },
+    career: careerJson(),
+  });
 }
 
 // ------------------------------------------------------------------ http helpers
@@ -566,6 +633,7 @@ const server = http.createServer(async (req, res) => {
       const valid = !!claims && claims.exp >= now();
       return send(res, 200, { valid, claims: valid ? claims : null });
     }
+    if ((r = m(/^\/v1\/games\/([a-z0-9-]+)\/stats$/))) return gameStats(req, res, r[1]);
     if (req.method === "POST" && p === "/dev/release") {
       // Development only: switch which version is live, to exercise patching.
       const { game_id, version } = await readBody(req);

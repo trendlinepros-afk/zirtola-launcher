@@ -152,6 +152,18 @@ pub fn launch(
     session_token: &str,
     api_base: &str,
 ) -> anyhow::Result<std::process::Child> {
+    launch_with_env(root, m, session_token, api_base, &[])
+}
+
+/// [`launch`] plus extra environment variables for the game (for example
+/// `ZIRTOLA_PLAY_SESSION_ID`, see `docs/GAME_STATS_API.md`).
+pub fn launch_with_env(
+    root: &Path,
+    m: &Manifest,
+    session_token: &str,
+    api_base: &str,
+    extra_env: &[(&str, &str)],
+) -> anyhow::Result<std::process::Child> {
     let exe = file_path(root, &m.launch.executable)?;
     if !exe.is_file() {
         anyhow::bail!("game executable is missing; run Verify to repair the install");
@@ -168,5 +180,53 @@ pub fn launch(
         .env("ZIRTOLA_GAME_ID", &m.game_id)
         .env("ZIRTOLA_GAME_VERSION", &m.version)
         .env("ZIRTOLA_API_BASE", api_base);
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
     Ok(cmd.spawn()?)
+}
+
+#[cfg(all(test, windows))]
+mod launch_tests {
+    use super::*;
+    use crate::manifest::LaunchSpec;
+
+    /// The game gets the session token, ids and any extra variables
+    /// (ZIRTOLA_PLAY_SESSION_ID for career stats) in its environment.
+    #[test]
+    fn launch_passes_session_and_extra_env() {
+        let dir = tempfile::tempdir().unwrap();
+        // A stand-in "game": a batch file that writes its ZIRTOLA_* variables next to itself.
+        std::fs::write(dir.path().join("game.cmd"), "@set ZIRTOLA_ > \"%~dp0env.txt\"\r\n").unwrap();
+        let m = Manifest {
+            schema: 1,
+            game_id: "dirt-simulator".into(),
+            version: "0.6.0".into(),
+            build_id: "test".into(),
+            platform: "win64".into(),
+            created_at: "2026-10-27T00:00:00Z".into(),
+            launch: LaunchSpec { executable: "game.cmd".into(), args: vec![], working_dir: None },
+            total_size: 0,
+            files: vec![],
+        };
+        let mut child = launch_with_env(
+            dir.path(),
+            &m,
+            "header.payload.sig",
+            "http://127.0.0.1:8787",
+            &[("ZIRTOLA_PLAY_SESSION_ID", "run-abcdefgh")],
+        )
+        .unwrap();
+        assert!(child.wait().unwrap().success());
+        let env = std::fs::read_to_string(dir.path().join("env.txt")).unwrap();
+        for want in [
+            "ZIRTOLA_SESSION_TOKEN=header.payload.sig",
+            "ZIRTOLA_GAME_ID=dirt-simulator",
+            "ZIRTOLA_GAME_VERSION=0.6.0",
+            "ZIRTOLA_API_BASE=http://127.0.0.1:8787",
+            "ZIRTOLA_PLAY_SESSION_ID=run-abcdefgh",
+        ] {
+            assert!(env.lines().any(|l| l.trim() == want), "missing {want} in {env}");
+        }
+    }
 }

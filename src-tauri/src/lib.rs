@@ -5,6 +5,7 @@ mod commands;
 mod crash;
 mod hardware;
 mod jobs;
+mod playtime;
 mod reports;
 mod saves;
 mod state;

@@ -23,6 +23,13 @@ export function duration(s: number | null | undefined): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+/** Hours played, already in quarter-hour steps: "5.25 hours played". */
+export function hoursPlayed(h: number | null | undefined): string {
+  const v = h != null && isFinite(h) && h > 0 ? h : 0;
+  const text = v.toLocaleString("en-US", { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 });
+  return `${text} ${v === 1 ? "hour" : "hours"} played`;
+}
+
 export function price(p: { amount: number; currency: string } | null | undefined): string {
   if (!p || !Number.isFinite(p.amount)) return "";
   try {

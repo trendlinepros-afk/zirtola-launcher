@@ -6,6 +6,7 @@ import {
   errorMessage,
   onDeepLink,
   onGameCrashed,
+  onPlaytimeUpdated,
   type CrashCandidate,
   onJobFinished,
   onJobProgress,
@@ -306,6 +307,7 @@ function hero(lg: LibraryGame) {
   const p = S.progress.get(g.id);
   const inst = lg.install;
   const meta: string[] = [];
+  if (S.me && (lg.owned || lg.hours_played > 0)) meta.push(fmt.hoursPlayed(lg.hours_played));
   if (inst?.version) meta.push(`Installed ${inst.version}`);
   if (inst?.update_available && inst.latest_version) meta.push(`Update ${inst.latest_version} available`);
   if (!inst && g.install_size) meta.push(`${fmt.bytes(g.install_size)} download`);
@@ -1277,6 +1279,8 @@ function crashDialog(c: CrashCandidate) {
 }
 
 onGameCrashed(queueCrash);
+// A game exited (or a heartbeat landed): show the new hours played.
+onPlaytimeUpdated(() => refreshSoon(0));
 
 async function checkLauncherUpdate(manual = true) {
   try {

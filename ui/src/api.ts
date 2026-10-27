@@ -82,6 +82,10 @@ export interface LibraryGame {
   entitlement: string | null;
   install: InstallInfo | null;
   job: JobKind | null;
+  /** Active play time in seconds (synced with the website). */
+  playtime_seconds: number;
+  /** The same in quarter-hour steps, rounded down. */
+  hours_played: number;
 }
 
 export interface AppInfo {
@@ -200,6 +204,11 @@ export interface CrashCandidate {
   error: string;
   files: { name: string; size: number }[];
   detected_at: string;
+}
+
+/** Fired after playtime reached the website (new totals are available). */
+export function onPlaytimeUpdated(cb: () => void): Promise<UnlistenFn> {
+  return listen("playtime-updated", () => cb());
 }
 
 export function onGameCrashed(cb: (c: CrashCandidate) => void): Promise<UnlistenFn> {

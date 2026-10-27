@@ -43,6 +43,18 @@ const revokedFamilies = new Set();
 const deviceCodes = new Map(); // device_code -> { user_code, account|null, exp, interval }
 const activations = {}; // "<account>:<game>" -> Map(device_id -> { name, last })
 const hardware = {}; // "<account>:<device_id>" -> last hardware report (in memory)
+const playtime = {}; // "<account>" -> { "<session_id>": report } (in memory, same rules as the website)
+
+function playtimeTotals(acct) {
+  const by = {};
+  for (const r of Object.values(playtime[acct] || {})) {
+    const g = (by[r.game_id] ||= { game_id: r.game_id, active_seconds: 0, total_seconds: 0, last_played_at: null });
+    g.active_seconds += r.active_seconds;
+    g.total_seconds += r.total_seconds;
+    g.last_played_at = r.seen_at;
+  }
+  return { hours_step: 0.25, games: Object.values(by).map((g) => ({ ...g, hours: Math.floor(g.active_seconds / 900) / 4 })) };
+}
 
 const now = () => Math.floor(Date.now() / 1000);
 const account = (id) => fixtures.accounts.find((a) => a.id === id);
@@ -582,6 +594,26 @@ const server = http.createServer(async (req, res) => {
         hardware[`${acct}:${body.device_id}`] = { ...body, reported_at: new Date().toISOString() };
         console.log(`[mock] hardware from ${acct}: ${body.os?.name ?? "?"} / ${body.gpus?.[0]?.name ?? "?"}`);
         return send(res, 200, { ok: true });
+      }
+      if (req.method === "GET" && p === "/v1/playtime") return send(res, 200, playtimeTotals(acct));
+      if (req.method === "POST" && p === "/v1/playtime") {
+        const body = await readBody(req);
+        const reports = Array.isArray(body.sessions) ? body.sessions.slice(0, 50) : [body];
+        const mine = (playtime[acct] ||= {});
+        const results = reports.map((r) => {
+          const sid = String(r.session_id || "");
+          if (!/^[A-Za-z0-9_-]{8,64}$/.test(sid) || !game(String(r.game_id || ""))) return { session_id: sid, ok: false, error: "bad_request" };
+          const prev = mine[sid];
+          mine[sid] = {
+            game_id: r.game_id,
+            active_seconds: Math.max(prev?.active_seconds ?? 0, Math.min(r.active_seconds | 0, r.total_seconds | 0)),
+            total_seconds: Math.max(prev?.total_seconds ?? 0, r.total_seconds | 0),
+            seen_at: new Date().toISOString(),
+          };
+          console.log(`[mock] playtime ${acct} ${r.game_id} ${sid}: ${r.active_seconds}s active / ${r.total_seconds}s${r.ended ? " (ended)" : ""}`);
+          return { session_id: sid, ok: true };
+        });
+        return send(res, 200, { ...playtimeTotals(acct), results });
       }
       if (req.method === "POST" && p === "/v1/crashes") return crashUpload(req, res, acct);
       if (req.method === "GET" && p === "/v1/dev/hardware") return send(res, 200, hardware);

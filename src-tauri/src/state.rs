@@ -30,7 +30,9 @@ pub fn api_base() -> String {
     match option_env!("ZIRTOLA_API_BASE") {
         Some(v) => v.to_string(),
         None if dev_mode() => "http://127.0.0.1:8787".to_string(),
-        None => "https://zirtola.com/api/launcher".to_string(),
+        // www: the bare zirtola.com only forwards its front page; every API
+        // path there is a 404.
+        None => "https://www.zirtola.com/api/launcher".to_string(),
     }
 }
 

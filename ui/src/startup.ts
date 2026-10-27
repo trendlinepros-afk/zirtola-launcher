@@ -41,6 +41,8 @@ export interface StartupResult {
   launcherInstalling: boolean;
   gameUpdates: string[];
   autoUpdating: string[];
+  /** The game check (entitlements and manifests) succeeded: safe to remember as "last checked". */
+  gamesChecked: boolean;
   note: string | null;
 }
 
@@ -79,13 +81,13 @@ export async function runStartupChecks(d: StartupDeps): Promise<StartupResult> {
     launcherInstalling: false,
     gameUpdates: [],
     autoUpdating: [],
+    gamesChecked: false,
     note: null,
   };
   const [launcher, library] = await Promise.allSettled([
     d.checkLauncherUpdate(),
     d.signedIn ? d.refreshLibrary() : Promise.resolve<StartupGame[]>([]),
   ]);
-  const failed = launcher.status === "rejected" || library.status === "rejected";
 
   if (launcher.status === "fulfilled" && launcher.value) {
     res.launcherUpdate = launcher.value.version;
@@ -104,6 +106,7 @@ export async function runStartupChecks(d: StartupDeps): Promise<StartupResult> {
   }
 
   if (library.status === "fulfilled") {
+    res.gamesChecked = true;
     res.gameUpdates = library.value.filter((g) => g.owned && g.updateAvailable).map((g) => g.id);
     if (d.autoUpdateGames) {
       for (const g of library.value) {
@@ -118,6 +121,9 @@ export async function runStartupChecks(d: StartupDeps): Promise<StartupResult> {
     }
   }
 
-  if (failed && !res.note) res.note = "Couldn't check for updates. You can still play; we'll try again later.";
+  if (!res.note) {
+    if (library.status === "rejected") res.note = "Couldn't check for updates. You can still play; we'll try again later.";
+    else if (launcher.status === "rejected") res.note = "Couldn't check for a launcher update. Games are up to date; we'll try again later.";
+  }
   return res;
 }

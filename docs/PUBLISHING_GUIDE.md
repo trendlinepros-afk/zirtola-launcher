@@ -78,7 +78,7 @@ after payment and in the receipt). After your first signed release:
 5. **Developers → API keys**: you'll need the **Secret key** (`sk_live_...`) for Railway. Secret.
    (Also try everything with the **Test mode** toggle on first; test keys start with `sk_test_`.)
 6. **Developers → Webhooks → Add endpoint**:
-   - URL: `https://zirtola.com/api/webhooks/stripe`
+   - URL: `https://www.zirtola.com/api/webhooks/stripe`
    - Events: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
      `checkout.session.async_payment_failed`, `checkout.session.expired`, `charge.refunded`,
      `charge.dispute.created`, `charge.dispute.closed`
@@ -90,19 +90,19 @@ after payment and in the receipt). After your first signed release:
    settle later unlock the game only when the money arrives. An order whose paid
    amount doesn't match is flagged in **Studio → Licensing → Sales** and not unlocked.
 
-### 3. Cloudflare R2 (where the game files are downloaded from)
+### 3. Railway Storage Bucket (where the game files are downloaded from)
 
-1. <https://dash.cloudflare.com> → sign up → **R2 Object Storage** → enable it (free up to 10 GB, no download fees).
-2. **Create bucket** → name `zirtola-cdn`.
-3. Bucket → **Settings** → **Custom Domains** → **Connect Domain** → `cdn.zirtola.com`
-   (your domain must be on Cloudflare; otherwise use **Public Development URL** for now).
-4. **R2 → Manage R2 API Tokens → Create API token** → permission **Object Read & Write**, bucket `zirtola-cdn`.
-   Copy the **Access Key ID**, **Secret Access Key** and the **S3 endpoint**. Secret.
-5. Install rclone (`winget install Rclone.Rclone`), then run `rclone config`:
-   new remote `r2`, type **s3**, provider **Cloudflare**, paste the keys and endpoint.
-   Test: `rclone lsd r2:` should list `zirtola-cdn`.
+Game files live in a private Railway Storage Bucket next to the website
+(storage $0.015/GB-month, downloads free). The website hands the launcher
+15-minute links to it, so only people who own the game can download. Setting
+it up is click-by-click in **docs/NEW_USER_TEST.md, steps A2–A5**: create the
+bucket, give the website its credentials, put the credentials and the publish
+token in your secrets folder, then upload and publish a build with
 
-The CDN address for the website is then `https://cdn.zirtola.com/{game}/chunks/{prefix}/{hash}`.
+```powershell
+cd "E:\Game Development\Voxel Mining"
+node Tools\release\release.mjs publish --version 0.2.0 --channel stable
+```
 
 ### 4. GitHub (launcher releases)
 
@@ -120,7 +120,7 @@ Repo `trendlinepros-afk/zirtola-launcher` → **Settings → Secrets and variabl
 
 | Name | Value |
 | --- | --- |
-| `ZIRTOLA_API_BASE` | `https://zirtola.com/api/launcher` |
+| `ZIRTOLA_API_BASE` | `https://www.zirtola.com/api/launcher` (optional: this is the built-in default; always `www`, the bare domain only forwards its front page) |
 | `ZIRTOLA_SIGN_MODE` | `azure` (only once step 1 is finished; leave unset before) |
 | `AZURE_SIGNING_ENDPOINT` | the endpoint from step 1.8 |
 | `AZURE_SIGNING_ACCOUNT` | `zirtola-signing` |
@@ -167,7 +167,7 @@ update before you can ship game builds.
 Never set `STRIPE_API_BASE` on Railway: it is only for local tests.
 
 3. Redeploy (Railway → **Deployments** → **Redeploy**) and open
-   `https://zirtola.com/api/launcher/v1/config`: it should show JSON.
+   `https://www.zirtola.com/api/launcher/v1/config`: it should show JSON.
 
 ### 6. The store page and price
 
@@ -304,7 +304,7 @@ The week before:
 
 - [ ] Signing done: a test launcher release's installer shows your name under **Digital Signatures**.
 - [ ] Stripe account activated, payouts and tax set, webhook added with all 5 events.
-- [ ] Railway variables set; `https://zirtola.com/api/launcher/v1/config` answers.
+- [ ] Railway variables set; `https://www.zirtola.com/api/launcher/v1/config` answers.
 - [ ] Dirt Digger stable build published; you installed it on a clean PC from the website's download link.
 - [ ] **Test mode run on the live site**: switch Railway's Stripe keys to `sk_test_`/test webhook secret,
       buy with card `4242 4242 4242 4242`, see it in the launcher, refund it in **Studio → Licensing → Sales**,
@@ -329,7 +329,7 @@ These need your accounts, identity or money, so they're yours:
 
 1. Azure: subscription, identity validation, certificate profile, app registration (Part 1.1).
 2. Stripe: account, business details, bank, tax, live keys, webhook (Part 1.2).
-3. Cloudflare R2 bucket, domain, API token, rclone setup (Part 1.3).
+3. Railway Storage Bucket and its website variables (Part 1.3, steps in NEW_USER_TEST.md A2–A5).
 4. GitHub secrets and variables (Part 1.4).
 5. Railway variables and merging the website PRs (Part 1.5).
 6. Optional: winget submission (`docs/DISTRIBUTION.md`).

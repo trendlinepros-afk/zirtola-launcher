@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
+- The launcher talks to https://www.zirtola.com (the bare zirtola.com only forwards
+  its front page).
 - One device per licence: playing on a second PC shows who has it ("Dirt Digger is
   active on <device> (last used <date>)") with **Deactivate and play here**; device ids
   come from the firmware UUID so reinstalls and upgrades keep the activation.

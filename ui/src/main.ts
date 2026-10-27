@@ -24,6 +24,7 @@ import * as fmt from "./format";
 import { focusFirst, onGamepadActive, onNavAction } from "./nav";
 import { buyUrl, openLink, storeUrl } from "./links";
 import { needsRecheck, runStartupChecks } from "./startup";
+import { parseNotes } from "./notes";
 
 // Open a website link; on failure (no URL yet, browser blocked) tell the player.
 function openSite(url: string | null | undefined, what: string) {
@@ -838,7 +839,7 @@ async function licenseDialog(lg: LibraryGame) {
       details,
       h("h4", {}, "Activation"),
       act,
-      h("p", { class: "muted small license-safety" }, "Keep your key private. Anyone with it can try to claim your game."),
+      lic.key ? h("p", { class: "muted small license-safety" }, "Keep your key private. Anyone with it can try to claim your game.") : null,
       h("div", { class: "modal-actions" }, btn("license-close", "Close", () => close(), { cls: "ghost" })),
     ),
   );
@@ -850,7 +851,6 @@ async function licenseDialog(lg: LibraryGame) {
 // as text. Everything is escaped first; no HTML from the server is trusted.
 function renderNotes(md: string): HTMLElement {
   const box = h("div", { class: "notes" });
-  let list: HTMLElement | null = null;
   const inline = (text: string) => {
     const span = h("span", {});
     const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
@@ -861,21 +861,10 @@ function renderNotes(md: string): HTMLElement {
     }
     return span;
   };
-  for (const raw of md.split(/\r?\n/)) {
-    const line = raw.trimEnd();
-    const item = /^\s*[-*]\s+(.*)$/.exec(line);
-    if (item) {
-      if (!list) {
-        list = h("ul", {});
-        box.append(list);
-      }
-      list.append(h("li", {}, inline(item[1]!)));
-      continue;
-    }
-    list = null;
-    if (!line.trim()) continue;
-    const head = /^#{1,3}\s+(.*)$/.exec(line);
-    box.append(head ? h("h4", {}, inline(head[1]!)) : h("p", {}, inline(line)));
+  for (const b of parseNotes(md)) {
+    if (b.kind === "h") box.append(h("h4", {}, inline(b.text)));
+    else if (b.kind === "p") box.append(h("p", {}, inline(b.text)));
+    else box.append(h("ul", {}, ...b.items.map((t) => h("li", {}, inline(t)))));
   }
   return box;
 }
@@ -1450,7 +1439,7 @@ async function startupUpdateChecks() {
     startGameUpdate: (id) => api.update(id),
   });
   S.checkingUpdates = false;
-  if (!res.note) S.lastUpdateCheck = res.checkedAt;
+  if (res.gamesChecked) S.lastUpdateCheck = res.checkedAt;
   S.updateNote = res.note;
   if (res.launcherUpdateRequired && !res.launcherInstalling) {
     toast(`This launcher version is no longer supported. Update to ${S.launcherUpdate?.version ?? "the latest version"} to keep playing online.`, "error");

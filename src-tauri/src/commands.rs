@@ -153,6 +153,27 @@ pub async fn library(state: State<'_, AppState>) -> CmdResult<Vec<LibraryGame>> 
     } else {
         vec![]
     };
+    // A game installed from a channel the account can no longer use (beta
+    // access ended, or a different account signed in) follows stable again,
+    // so it keeps getting updates instead of silently checking a channel it
+    // can't see.
+    if signed_in {
+        let mut reg = state.registry.lock().await;
+        let mut changed = false;
+        for e in &ents {
+            if let Some(rec) = reg.get(&e.game_id).cloned() {
+                if rec.branch != "live" && !e.branches.iter().any(|b| b == &rec.branch) {
+                    let mut rec = rec;
+                    rec.branch = "live".into();
+                    reg.put(rec);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            let _ = reg.save();
+        }
+    }
     let registry = state.registry.lock().await.installs.clone();
     let played = crate::playtime::active_seconds(&state).await;
 

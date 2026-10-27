@@ -51,6 +51,8 @@ const careers = {};
 const statRuns = {};
 const GOLD_GPH = +(process.env.MOCK_GOLD_MAX_GRAMS_PER_HOUR || 50);
 const GOLD_BURST_G = 5;
+const MATERIAL_M3PH = +(process.env.MOCK_MATERIAL_MAX_M3_PER_HOUR || 800);
+const MATERIAL_BURST_M3 = 50;
 
 function playtimeTotals(acct) {
   const by = {};
@@ -112,20 +114,25 @@ async function gameStats(req, res, gid) {
     gold_mined_ozt: +(career.mined_mg / 1000 / 31.1034768).toFixed(6),
     gold_recovered_g: career.recovered_mg / 1000,
     gold_recovered_ozt: +(career.recovered_mg / 1000 / 31.1034768).toFixed(6),
+    material_moved_m3: (career.material_l || 0) / 1000,
+    material_moved_yd3: Math.round(((career.material_l || 0) / 1000) * 1.307950619 * 1000) / 1000,
   });
   if (req.method === "GET") return send(res, 200, { career: careerJson() });
   if (req.method !== "POST") return err(res, 404, "not_found");
   const body = await readBody(req);
   if (!Array.isArray(body.reports) || !body.reports.length || body.reports.length > 50) return err(res, 400, "bad_request", "Expected { reports: [ … ] } (1–50).");
-  const run = (statRuns[claims.jti] ||= { seqs: new Map(), mined_mg: 0, recovered_mg: 0, held_mg: 0, claimed: 0, allowed: 0, ps: null });
+  const run = (statRuns[claims.jti] ||= { seqs: new Map(), mined_mg: 0, recovered_mg: 0, held_mg: 0, material_l: 0, held_material_l: 0, claimed: 0, allowed: 0, ps: null });
   if (!run.ps && typeof body.play_session_id === "string") run.ps = body.play_session_id;
   const cap = (secs) => Math.round((GOLD_GPH * secs / 3600 + GOLD_BURST_G) * 1000);
+  const capL = (secs) => Math.round((MATERIAL_M3PH * secs / 3600 + MATERIAL_BURST_M3) * 1000);
   const order = body.reports.map((rep, i) => ({ rep, i })).sort((a, b) => (+a.rep?.seq || 0) - (+b.rep?.seq || 0));
   const results = new Array(body.reports.length);
   for (const { rep, i } of order) {
     const seq = rep?.seq;
     const mined = rep?.gold_mined_g ?? 0, recovered = rep?.gold_recovered_g ?? 0, active = rep?.active_seconds;
-    if (!Number.isInteger(seq) || seq < 1 || seq > 1e6 || typeof mined !== "number" || typeof recovered !== "number" || mined < 0 || recovered < 0 || mined > 1000 || recovered > 1000 || !Number.isInteger(active) || active < 0) {
+    const material = rep?.material_moved_m3 ?? 0, rehandled = rep?.material_rehandled_m3 ?? 0;
+    const badMaterial = typeof material !== "number" || typeof rehandled !== "number" || material < 0 || rehandled < 0 || material > 1e5 || rehandled > 1e5;
+    if (!Number.isInteger(seq) || seq < 1 || seq > 1e6 || typeof mined !== "number" || typeof recovered !== "number" || mined < 0 || recovered < 0 || mined > 1000 || recovered > 1000 || !Number.isInteger(active) || active < 0 || badMaterial) {
       results[i] = { seq: Number.isInteger(seq) ? seq : null, status: "rejected", error: "bad_request", message: "Bad report values." };
       continue;
     }
@@ -141,16 +148,21 @@ async function gameStats(req, res, gid) {
     const minedMg = Math.round(mined * 1000), recoveredMg = Math.round(recovered * 1000);
     const accM = Math.min(minedMg, Math.max(0, cap(allowed) - run.mined_mg));
     const accR = Math.min(recoveredMg, Math.max(0, career.mined_mg + accM + GOLD_BURST_G * 1000 - career.recovered_mg));
+    const materialL = Math.round(material * 1000);
+    const accL = Math.min(materialL, Math.max(0, capL(allowed) - run.material_l));
+    run.material_l += accL; run.held_material_l += materialL - accL;
+    career.material_l = (career.material_l || 0) + accL;
+    career.rehandled_l = (career.rehandled_l || 0) + Math.round(rehandled * 1000);
     run.mined_mg += accM; run.recovered_mg += accR; run.held_mg += minedMg - accM + recoveredMg - accR;
     career.mined_mg += accM; career.recovered_mg += accR; career.held_mg += minedMg - accM + recoveredMg - accR;
-    const out = { seq, status: accM < minedMg || accR < recoveredMg ? "capped" : "accepted", accepted_mined_g: accM / 1000, accepted_recovered_g: accR / 1000, held_mined_g: (minedMg - accM) / 1000, held_recovered_g: (recoveredMg - accR) / 1000 };
+    const out = { seq, status: accM < minedMg || accR < recoveredMg || accL < materialL ? "capped" : "accepted", accepted_mined_g: accM / 1000, accepted_recovered_g: accR / 1000, held_mined_g: (minedMg - accM) / 1000, held_recovered_g: (recoveredMg - accR) / 1000, accepted_material_m3: accL / 1000, held_material_m3: (materialL - accL) / 1000 };
     run.seqs.set(seq, out);
     results[i] = out;
-    console.log(`[mock] stats ${claims.sub} ${gid} run ${claims.jti} #${seq}: +${mined} g mined, +${recovered} g recovered, ${active}s active -> ${out.status}`);
+    console.log(`[mock] stats ${claims.sub} ${gid} run ${claims.jti} #${seq}: +${mined} g mined, +${recovered} g recovered, +${material} m³ bank / ${rehandled} m³ rehandled, ${active}s active -> ${out.status}`);
   }
   return send(res, 200, {
     results,
-    session: { allowed_seconds: run.allowed, gold_mined_g: run.mined_mg / 1000, gold_recovered_g: run.recovered_mg / 1000, held_g: run.held_mg / 1000, cap_g: cap(run.allowed) / 1000 },
+    session: { allowed_seconds: run.allowed, gold_mined_g: run.mined_mg / 1000, gold_recovered_g: run.recovered_mg / 1000, held_g: run.held_mg / 1000, cap_g: cap(run.allowed) / 1000, material_moved_m3: run.material_l / 1000, held_material_m3: run.held_material_l / 1000, material_cap_m3: capL(run.allowed) / 1000 },
     career: careerJson(),
   });
 }

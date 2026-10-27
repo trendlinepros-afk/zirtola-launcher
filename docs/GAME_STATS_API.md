@@ -1,8 +1,9 @@
 # Career stats from the game (contract v1)
 
 Games report the player's career stats to the website so they appear on the
-player's public profile ("Gold mined", next to "Hours played") and in
-Studio → Leaderboard. The first stat set is Dirt Digger's gold. This document is
+player's public profile ("Gold mined" and "Material moved", next to "Hours
+played") and in Studio → Leaderboard. The first stat set is Dirt Digger's gold
+and material moved. This document is
 what the game implements (Unreal C++); the website side is described in the
 `retail-store` repo, `docs/LAUNCHER_API.md` → "Career stats".
 
@@ -11,8 +12,8 @@ The short version:
 - Started by the launcher → the game has a **launch token** in
   `ZIRTOLA_SESSION_TOKEN`. That token is the credential: send it as
   `Authorization: Bearer …` with every report.
-- Every few minutes and at exit, POST **increments** (gold since the last
-  report) with a **sequence number** per run. Resending is always safe.
+- Every few minutes and at exit, POST **increments** (gold and material since
+  the last report) with a **sequence number** per run. Resending is always safe.
 - Can't send? Keep the reports in a file and send them later.
 - Not started by the launcher → don't report anything. Play is unaffected.
 
@@ -49,14 +50,17 @@ no requests, no queue, no messages, gold works exactly the same in the game.
 
 ## 2. What to count (Dirt Digger)
 
-Both values are **grams of fine gold** (the gold itself, not black sand or
-concentrate), as decimals with up to 3 places (milligrams). Report **increments**:
-what happened since the previous report of this run.
+Gold values are **grams of fine gold** (the gold itself, not black sand or
+concentrate), as decimals with up to 3 places (milligrams). Material values are
+**cubic metres**, up to 3 places (litres). Report **increments**: what happened
+since the previous report of this run.
 
 | Field | Meaning in Dirt Digger | Where it happens |
 | --- | --- | --- |
 | `gold_mined_g` | gold the player won from the ground: caught in the riffles of a sluice/trommel (plus any gold picked up directly, e.g. a nugget) | when gold is added to a plant's recovered gold (`ATrommelActor` stats `GoldRecovered`) |
 | `gold_recovered_g` | gold cleaned up out of the plant into the player's savings/gold ledger | when a cleanup adds gold to the player's gold |
+| `material_moved_m3` *(optional)* | **bank** m³ (in-place, undisturbed ground) dug out by the player's machines: excavator bucket cuts, loader bucket cuts, dozer blade and ripper cuts into the heightfield's bank material | when a machine's cut removes bank volume from the terrain (the bank part of the `FSoilVolume` it takes; a ripper counts when it turns bank to spoil, e.g. `URipperSoilComponent::TotalLoosenedM3`, and the later blade pass over that spoil is rehandling) |
+| `material_rehandled_m3` *(optional)* | **loose** m³ of already-dug material the machines pick up or push again: spoil, stockpiles, windrows, truck dumps, slumped piles | when a machine's cut takes loose (already disturbed) volume |
 
 Rules:
 
@@ -68,6 +72,14 @@ Rules:
 - Gold recovered can never exceed gold mined over a career (the website
   enforces that: see section 6), so count the riffle catch as mined even if
   the player hasn't cleaned up yet.
+- Material moved is **bank** volume, so it never double-counts: digging a
+  pile you already dug, re-pushing a windrow or reloading a stockpile is
+  rehandling, not moved. Natural slumping, erosion, water, dumping and
+  spilling are neither (no machine cut them). Don't convert loose to bank with
+  a swell factor; report bank volume where the terrain says it was bank, and
+  loose volume as rehandled.
+- `material_rehandled_m3` is shown in Studio only. Send it if the game tracks
+  it; omit it otherwise.
 - Never send the player's total. The website keeps the official total and
   ignores client totals.
 
@@ -89,8 +101,10 @@ Content-Type: application/json
   "play_session_id": "Qm9sZC1ydW4tMTIzNDU2",
   "game_version": "0.6.0",
   "reports": [
-    { "seq": 1, "gold_mined_g": 1.254, "gold_recovered_g": 0.0, "active_seconds": 300 },
-    { "seq": 2, "gold_mined_g": 0.871, "gold_recovered_g": 2.1, "active_seconds": 600 }
+    { "seq": 1, "gold_mined_g": 1.254, "gold_recovered_g": 0.0,
+      "material_moved_m3": 41.5, "material_rehandled_m3": 12.0, "active_seconds": 300 },
+    { "seq": 2, "gold_mined_g": 0.871, "gold_recovered_g": 2.1,
+      "material_moved_m3": 38.25, "material_rehandled_m3": 60.0, "active_seconds": 600 }
   ]
 }
 ```
@@ -103,9 +117,12 @@ Content-Type: application/json
 | `reports[].seq` | integer 1…1,000,000 | 1, 2, 3 … per run, never reused within the run |
 | `reports[].gold_mined_g` | number ≥ 0 | increment since the previous report; ≤ 1000 per report |
 | `reports[].gold_recovered_g` | number ≥ 0 | increment since the previous report; ≤ 1000 per report |
+| `reports[].material_moved_m3` | number ≥ 0, optional | bank m³ increment; ≤ 100,000 per report; omitted = 0 |
+| `reports[].material_rehandled_m3` | number ≥ 0, optional | loose m³ increment; ≤ 100,000 per report; omitted = 0 |
 | `reports[].active_seconds` | integer ≥ 0 | running total of active play in this run |
 
-A report with both increments zero is fine (it keeps `active_seconds`
+Builds from before material was added simply leave the material fields out.
+A report with all increments zero is fine (it keeps `active_seconds`
 current) but you may skip it.
 
 Response `200`:
@@ -114,13 +131,15 @@ Response `200`:
 {
   "results": [
     { "seq": 1, "status": "accepted", "accepted_mined_g": 1.254, "accepted_recovered_g": 0,
-      "held_mined_g": 0, "held_recovered_g": 0 },
+      "held_mined_g": 0, "held_recovered_g": 0, "accepted_material_m3": 41.5, "held_material_m3": 0 },
     { "seq": 2, "status": "duplicate", "accepted_mined_g": 0.871, "accepted_recovered_g": 2.1,
-      "held_mined_g": 0, "held_recovered_g": 0 }
+      "held_mined_g": 0, "held_recovered_g": 0, "accepted_material_m3": 38.25, "held_material_m3": 0 }
   ],
-  "session": { "allowed_seconds": 600, "gold_mined_g": 2.125, "gold_recovered_g": 2.1, "held_g": 0, "cap_g": 13.333 },
+  "session": { "allowed_seconds": 600, "gold_mined_g": 2.125, "gold_recovered_g": 2.1, "held_g": 0, "cap_g": 13.333,
+               "material_moved_m3": 79.75, "held_material_m3": 0, "material_cap_m3": 183.333 },
   "career": { "game_id": "dirt-simulator", "gold_mined_g": 812.4, "gold_mined_ozt": 26.119,
-              "gold_recovered_g": 790.1, "gold_recovered_ozt": 25.402 }
+              "gold_recovered_g": 790.1, "gold_recovered_ozt": 25.402,
+              "material_moved_m3": 18250.5, "material_moved_yd3": 23870.746 }
 }
 ```
 
@@ -191,8 +210,8 @@ internet.
     { "token": "eyJhbGciOiJFZERTQSIs…", "game": "dirt-simulator", "next_seq": 7,
       "play_session_id": "Qm9sZC1ydW4tMTIzNDU2", "game_version": "0.6.0",
       "started_utc": "2026-10-27T18:02:11Z",
-      "pending": [ { "seq": 5, "gold_mined_g": 0.42, "gold_recovered_g": 0, "active_seconds": 1500 },
-                   { "seq": 6, "gold_mined_g": 0.31, "gold_recovered_g": 0, "active_seconds": 1800 } ] }
+      "pending": [ { "seq": 5, "gold_mined_g": 0.42, "gold_recovered_g": 0, "material_moved_m3": 52.1, "active_seconds": 1500 },
+                   { "seq": 6, "gold_mined_g": 0.31, "gold_recovered_g": 0, "material_moved_m3": 47.8, "active_seconds": 1800 } ] }
   ]
 }
 ```
@@ -237,6 +256,13 @@ the game never depends on the server's answer.
 - **Server-authoritative totals.** The career total is the sum of accepted
   increments. Client totals are never read.
 - **Idempotent.** `(run, seq)` is unique; resends answer `duplicate`.
+- **Material plausibility.** For each run, accepted material moved stays under
+  `800 bank m³/h × counted hours + 50 m³` (`CAREER_MATERIAL_MAX_M3_PER_HOUR`,
+  `CAREER_MATERIAL_BURST_M3`): a 20 t excavator digs at most ~200–250 bank
+  m³/h in loose gravel, the whole base fleet ~600. Excess is held and flagged
+  like gold (`over_material_rate`). Rehandled material is stored as reported,
+  never capped, never public. Material is stored in litres and shown in bank
+  cubic yards (1 m³ = 1.30795 yd³).
 - **Plausibility.** For each run, accepted gold mined stays under
   `50 g/h × counted hours + 5 g` (both are website settings:
   `CAREER_GOLD_MAX_GRAMS_PER_HOUR`, `CAREER_GOLD_BURST_GRAMS`). Counted time is
@@ -248,7 +274,8 @@ the game never depends on the server's answer.
   excess is held** and flagged for Studio to release or dismiss. So: report
   real numbers and real active time; a faster-than-possible rate is never
   counted publicly.
-- **Privacy.** Players can hide "Gold mined" on their profile (Settings);
+- **Privacy.** Players can hide "Gold mined" and "Material moved" on their
+  profile (Settings, one toggle each);
   Studio always sees it. The game doesn't need to do anything about it.
 
 ## 9. Unreal C++ example
@@ -267,6 +294,8 @@ struct FZirtolaStatReport
     int32 Seq = 0;
     double GoldMinedG = 0.0;      // increment since the previous report
     double GoldRecoveredG = 0.0;  // increment since the previous report
+    double MaterialMovedM3 = 0.0;      // bank m³ increment (machine cuts into bank ground)
+    double MaterialRehandledM3 = 0.0;  // loose m³ increment (already-dug material moved again)
     int32 ActiveSeconds = 0;      // running total for this run
 };
 
@@ -326,6 +355,9 @@ void FZirtolaStats::Send(const FString& Token, const FString& PlaySessionId, con
         // Milligram precision; never negative.
         J->SetNumberField(TEXT("gold_mined_g"), FMath::RoundToDouble(FMath::Max(0.0, R.GoldMinedG) * 1000.0) / 1000.0);
         J->SetNumberField(TEXT("gold_recovered_g"), FMath::RoundToDouble(FMath::Max(0.0, R.GoldRecoveredG) * 1000.0) / 1000.0);
+        // Litre precision; never negative.
+        J->SetNumberField(TEXT("material_moved_m3"), FMath::RoundToDouble(FMath::Max(0.0, R.MaterialMovedM3) * 1000.0) / 1000.0);
+        J->SetNumberField(TEXT("material_rehandled_m3"), FMath::RoundToDouble(FMath::Max(0.0, R.MaterialRehandledM3) * 1000.0) / 1000.0);
         J->SetNumberField(TEXT("active_seconds"), FMath::Max(0, R.ActiveSeconds));
         Reports.Add(MakeShared<FJsonValueObject>(J));
     }
@@ -386,13 +418,16 @@ if (bEnabled)
 // Gameplay hooks add to the accumulators (only when bEnabled):
 //   OnGoldCaught(double Grams)     { PendingMinedG += Grams; }      // riffle catch, nuggets
 //   OnGoldCleanedUp(double Grams)  { PendingRecoveredG += Grams; }  // cleanup into savings
+//   OnMachineCut(const FSoilVolume& Taken)                          // excavator/loader/dozer/ripper
+//   { PendingBankM3 += Taken.Bank(); PendingLooseM3 += Taken.Loose(); }  // (whatever the terrain calls them)
 
 // Every 5 min, on save, after a cleanup and at exit:
 FZirtolaStatReport R;
 R.Seq = NextSeq++;
 R.GoldMinedG = PendingMinedG;  R.GoldRecoveredG = PendingRecoveredG;
+R.MaterialMovedM3 = PendingBankM3;  R.MaterialRehandledM3 = PendingLooseM3;
 R.ActiveSeconds = ActivePlaySeconds;
-PendingMinedG = PendingRecoveredG = 0.0;
+PendingMinedG = PendingRecoveredG = PendingBankM3 = PendingLooseM3 = 0.0;
 CurrentRun.Pending.Add(R);
 SaveQueue();                     // before sending
 if (!bInFlight) { bInFlight = true; FZirtolaStats::Send(Token, PlaySessionId, Version, CurrentRun.Pending,
@@ -405,7 +440,8 @@ if (!bInFlight) { bInFlight = true; FZirtolaStats::Send(Token, PlaySessionId, Ve
   the game with `ZIRTOLA_API_BASE=http://127.0.0.1:8787` and a token from the
   launcher in dev mode. The mock implements this endpoint with the same rules
   (in memory) and logs each report: `[mock] stats … #3: +0.42 g mined …`.
-  `MOCK_GOLD_MAX_GRAMS_PER_HOUR` changes the cap.
+  `MOCK_GOLD_MAX_GRAMS_PER_HOUR` and `MOCK_MATERIAL_MAX_M3_PER_HOUR` change the
+  caps.
 - **Local website**: `retail-store` repo, `npm run test:stats` covers auth,
   idempotency, the cap, privacy and the Studio leaderboard.
 - Things to try in the game: pull the network cable mid-run and quit (the queue

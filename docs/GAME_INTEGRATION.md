@@ -135,7 +135,7 @@ before the old one is retired (keys carry a `kid`, so a game can pin several).
 ## Career stats (gold mined)
 
 The game reports career stats (Dirt Digger: gold mined and recovered) to the
-website with the same launch token. Endpoint, batching, offline queue and an
+website with the same launch token, plus material moved (bank m³). Endpoint, batching, offline queue and an
 Unreal example: [`docs/GAME_STATS_API.md`](GAME_STATS_API.md).
 
 ## Crash reports

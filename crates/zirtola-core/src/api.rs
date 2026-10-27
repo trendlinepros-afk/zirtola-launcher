@@ -159,6 +159,49 @@ pub struct LatestBuild {
     pub released_at: String,
     #[serde(default)]
     pub notes: Option<String>,
+    /// Installs older than this must update before playing (newest required release).
+    #[serde(default)]
+    pub min_version: Option<String>,
+    #[serde(default)]
+    pub mandatory_reason: Option<String>,
+}
+
+/// -1/0/1 for dotted numeric versions ("1.10.0" > "1.9.3"); a pre-release sorts first.
+pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
+    let parse = |v: &str| {
+        let v = v.trim().trim_start_matches('v');
+        let (core, pre) = match v.split_once('-') {
+            Some((c, p)) => (c, Some(p.to_string())),
+            None => (v, None),
+        };
+        (core.split('.').map(|n| n.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>(), pre)
+    };
+    let (x, xp) = parse(a);
+    let (y, yp) = parse(b);
+    for i in 0..x.len().max(y.len()) {
+        let o = x.get(i).copied().unwrap_or(0).cmp(&y.get(i).copied().unwrap_or(0));
+        if o != std::cmp::Ordering::Equal {
+            return o;
+        }
+    }
+    match (xp, yp) {
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        _ => std::cmp::Ordering::Equal,
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::compare_versions;
+    use std::cmp::Ordering::*;
+    #[test]
+    fn versions_compare_numerically() {
+        assert_eq!(compare_versions("1.10.0", "1.9.3"), Greater);
+        assert_eq!(compare_versions("0.2.0", "0.2"), Equal);
+        assert_eq!(compare_versions("1.0.0-beta.1", "1.0.0"), Less);
+        assert_eq!(compare_versions("0.1.9", "0.2.0"), Less);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -547,11 +590,15 @@ impl ApiClient {
         game_id: &str,
         device_id: &str,
         device_name: &str,
+        version: &str,
+        branch: &str,
     ) -> Result<LaunchToken, ApiError> {
+        // The installed version and channel let the website refuse installs
+        // older than a required (mandatory) release.
         self.post(
             "/v1/launch-tokens",
             Some(at),
-            &serde_json::json!({ "game_id": game_id, "device_id": device_id, "device_name": device_name }),
+            &serde_json::json!({ "game_id": game_id, "device_id": device_id, "device_name": device_name, "version": version, "branch": branch }),
         )
         .await
     }

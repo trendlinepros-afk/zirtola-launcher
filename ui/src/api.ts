@@ -44,6 +44,19 @@ export interface InstallInfo {
   update_available: boolean;
   paused_version: string | null;
   folder_missing: boolean;
+  /** Older than a required (mandatory) release: must update before Play. */
+  update_required: boolean;
+  min_version: string | null;
+  required_reason: string | null;
+}
+
+export interface LauncherUpdateInfo {
+  version: string;
+  notes: string | null;
+  date: string | null;
+  /** A required launcher update: offered without "Later". */
+  mandatory: boolean;
+  mandatory_reason: string | null;
 }
 
 export interface ChangelogEntry {
@@ -52,6 +65,8 @@ export interface ChangelogEntry {
   released_at: string;
   notes: string;
   current: boolean;
+  mandatory?: boolean;
+  mandatory_reason?: string | null;
 }
 
 export interface ActiveDevice {
@@ -194,7 +209,7 @@ export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
   setSettings: (settings: Settings) => invoke<void>("set_settings", { settings }),
   checkLauncherUpdate: () =>
-    invoke<{ version: string; notes: string | null; date: string | null } | null>("check_launcher_update"),
+    invoke<LauncherUpdateInfo | null>("check_launcher_update"),
   installLauncherUpdate: () => invoke<void>("install_launcher_update"),
   startupDeepLink: () => invoke<string | null>("startup_deep_link"),
 };

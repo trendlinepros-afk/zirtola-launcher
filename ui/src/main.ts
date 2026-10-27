@@ -18,6 +18,7 @@ import {
   type CatalogGame,
   type CmdError,
   type JobProgress,
+  type LauncherUpdateInfo,
   type LibraryGame,
   type Me,
   type Settings,
@@ -26,7 +27,8 @@ import { icons, keyArt, logoMark } from "./art";
 import * as fmt from "./format";
 import { focusFirst, onGamepadActive, onNavAction } from "./nav";
 import { buyUrl, openLink, storeUrl } from "./links";
-import { needsRecheck, runStartupChecks } from "./startup";
+import { belowMinimum, needsRecheck, runStartupChecks } from "./startup";
+import { PromptMemo, entriesBetween, gamePromptKind, requiredGameText, requiredLauncherText } from "./updates";
 import { parseNotes } from "./notes";
 import { blocking, installable, installLine, playBlockedReason } from "./requirements";
 
@@ -51,7 +53,7 @@ const S = {
   progress: new Map<string, JobProgress>(),
   signingIn: false,
   settings: null as Settings | null,
-  launcherUpdate: null as { version: string; notes: string | null } | null,
+  launcherUpdate: null as LauncherUpdateInfo | null,
   launcherUpdating: null as { downloaded: number; total: number | null } | null,
   // Update checks: when the last one succeeded, and a small note if it couldn't run.
   lastUpdateCheck: null as number | null,
@@ -253,7 +255,7 @@ function sidebar() {
     S.launcherUpdate
       ? h(
           "button",
-          { class: "update-card", "data-id": "launcher-update", type: "button", onclick: installLauncherUpdate, disabled: !!S.launcherUpdating },
+          { class: `update-card ${launcherUpdateRequired() ? "required" : ""}`, "data-id": "launcher-update", type: "button", onclick: () => void launcherUpdatePrompt({ force: true }), disabled: !!S.launcherUpdating },
           h("span", { class: "ico", html: icons.update }),
           h(
             "span",
@@ -266,7 +268,7 @@ function sidebar() {
                 ? S.launcherUpdating.total
                   ? `${Math.round((S.launcherUpdating.downloaded / S.launcherUpdating.total) * 100)}%`
                   : fmt.bytes(S.launcherUpdating.downloaded)
-                : "Restart to update",
+                : launcherUpdateRequired() ? "Required update" : "Restart to update",
             ),
           ),
         )
@@ -317,7 +319,7 @@ function hero(lg: LibraryGame) {
   const meta: string[] = [];
   if (S.me && (lg.owned || lg.hours_played > 0)) meta.push(fmt.hoursPlayed(lg.hours_played));
   if (inst?.version) meta.push(`Installed ${inst.version}`);
-  if (inst?.update_available && inst.latest_version) meta.push(`Update ${inst.latest_version} available`);
+  if (inst?.update_available && inst.latest_version) meta.push(`Update ${inst.latest_version} ${inst.update_required ? "required" : "available"}`);
   if (!inst && g.install_size) meta.push(`${fmt.bytes(g.install_size)} download`);
   if (lg.entitlement) meta.push(lg.entitlement === "purchase" ? "Purchased" : lg.entitlement === "key" ? "Key redeemed" : "Granted by the studio");
 
@@ -336,8 +338,14 @@ function hero(lg: LibraryGame) {
         lg.owned && inst?.update_available
           ? h(
               "button",
-              { class: "pill update", type: "button", "data-id": "update-available", title: "See what's new", onclick: () => void whatsNew(lg) },
-              `Update available${inst.latest_version ? ` · ${inst.latest_version}` : ""} · What's new`,
+              {
+                class: `pill update ${inst.update_required ? "required" : ""}`,
+                type: "button",
+                "data-id": "update-available",
+                title: inst.update_required ? requiredGameText(g.title, inst) : "See what's new",
+                onclick: () => void gameUpdatePrompt(lg, { force: true }),
+              },
+              `${inst.update_required ? "Required update" : "Update available"}${inst.latest_version ? ` · ${inst.latest_version}` : ""} · What's new`,
             )
           : null,
       ),
@@ -487,7 +495,7 @@ function actions(lg: LibraryGame) {
   if (inst.update_available || inst.paused_version) {
     const label = inst.paused_version ? `Resume update to ${inst.paused_version}` : `Update to ${inst.latest_version}`;
     row.append(btn("update", label, () => run(() => api.update(g.id)), { cls: "primary big", icon: icons.update }));
-    row.append(...playButton(g, "ghost big"));
+    row.append(...playButton(g, "ghost big", inst.update_required ? requiredGameText(g.title, inst) : null));
   } else {
     row.append(...playButton(g, "primary big play"));
   }
@@ -512,7 +520,11 @@ function actions(lg: LibraryGame) {
 
 // Play, or a disabled Play (with the reason as a tooltip) plus Requirements
 // while something the game needs is missing.
-function playButton(g: CatalogGame, cls: string): HTMLElement[] {
+function playButton(g: CatalogGame, cls: string, updateReason: string | null = null): HTMLElement[] {
+  // A required (mandatory) update blocks Play until it's installed.
+  if (updateReason) {
+    return [h("span", { class: "disabled-wrap", title: updateReason }, btn("play", "Play", () => {}, { cls, icon: icons.play, disabled: true, title: updateReason }))];
+  }
   const reason = playBlockedReason(S.prereqs);
   if (!reason) return [btn("play", "Play", () => launch(g), { cls, icon: icons.play })];
   return [
@@ -692,6 +704,10 @@ async function launch(g: CatalogGame) {
   if (S.me && needsRecheck(S.lastUpdateCheck, Date.now())) {
     await loadLibrary();
     const lg = S.library.find((x) => x.game.id === g.id);
+    if (lg?.install?.update_required && !lg.job) {
+      void gameUpdatePrompt(lg, { force: true });
+      return;
+    }
     if (lg?.install?.update_available && !lg.job) {
       if (S.settings?.auto_update_games) {
         toast(`${g.title} ${lg.install.latest_version ?? ""} is out. Updating first; press Play when it's done.`);
@@ -706,7 +722,13 @@ async function launch(g: CatalogGame) {
     toast(`Starting ${g.title}…`);
   } catch (e) {
     if (errorCode(e) === "device_conflict") deviceConflictDialog(g, e as CmdError);
-    else handleError(e);
+    else if (errorCode(e) === "update_required") {
+      // The website refused an install older than a required release.
+      await loadLibrary();
+      const lg = S.library.find((x) => x.game.id === g.id);
+      if (lg?.install?.version) void gameUpdatePrompt(lg, { force: true, requiredMessage: errorMessage(e) });
+      else toast(errorMessage(e), "error");
+    } else handleError(e);
   }
 }
 
@@ -929,6 +951,102 @@ async function whatsNew(lg: LibraryGame, opts: { afterUpdate?: boolean } = {}) {
   modal(opts.afterUpdate ? `${lg.game.title} updated: what's new` : `${lg.game.title}: updates`, h("div", {}, body));
 }
 
+// ------------------------------------------------------------------ update prompts
+
+// "Update now / Later" with the notes of every release since the installed
+// one (updates.ts). A required update has no Later and says why.
+const prompts = new PromptMemo();
+
+type NoteEntry = { version: string; released_at: string; notes: string; channel?: string; mandatory?: boolean; mandatory_reason?: string | null };
+
+function changelogList(entries: NoteEntry[]) {
+  return h(
+    "div",
+    { class: "changelog" },
+    ...entries.map((en) =>
+      h(
+        "section",
+        { class: "cl-entry" },
+        h(
+          "div",
+          { class: "cl-head" },
+          h("strong", {}, en.version),
+          en.channel === "beta" ? h("span", { class: "pill beta" }, "Beta") : null,
+          en.mandatory ? h("span", { class: "pill required", title: en.mandatory_reason ?? "" }, "Required") : null,
+          en.released_at ? h("small", {}, new Date(en.released_at).toLocaleDateString()) : null,
+        ),
+        renderNotes(en.notes || "No notes for this version."),
+      ),
+    ),
+  );
+}
+
+function updateWindow(o: { id: string; title: string; required: boolean; reason: string | null; intro: string; entries: NoteEntry[]; onUpdate: () => unknown }): Promise<void> {
+  return new Promise((resolve) => {
+    const content = h(
+      "div",
+      { class: "update-prompt" },
+      o.required && o.reason ? h("div", { class: "required-banner", "data-id": "required-reason" }, h("span", { class: "ico", html: icons.update }), h("span", {}, o.reason)) : null,
+      h("p", { class: "muted" }, o.intro),
+      o.entries.length ? changelogList(o.entries) : h("p", { class: "muted" }, "No release notes for this update."),
+      h(
+        "div",
+        { class: "modal-actions" },
+        o.required ? null : btn("update-later", "Later", () => close(), { cls: "ghost" }),
+        btn("update-now", "Update now", () => { close(); void o.onUpdate(); }, { cls: "primary", icon: icons.update }),
+      ),
+    );
+    const close = modal(o.title, content, { locked: o.required, id: o.id, onClose: resolve });
+  });
+}
+
+/** Offer a game update. Optional ones show once per version per session unless forced. */
+async function gameUpdatePrompt(lg: LibraryGame, opts: { force?: boolean; requiredMessage?: string } = {}) {
+  const inst = lg.install;
+  const kind = opts.requiredMessage ? "required" : gamePromptKind(inst);
+  if (!kind || !inst?.version || !inst.latest_version || lg.job) return;
+  if (!opts.force && !prompts.shouldShow(lg.game.id, inst.latest_version, kind === "required")) return;
+  if (document.querySelector(`[data-id="game-update-${lg.game.id}"]`)) return;
+  let entries: NoteEntry[] = [];
+  try {
+    entries = entriesBetween((await api.changelog(lg.game.id)).entries, inst.version, inst.latest_version);
+  } catch {
+    /* the window still offers the update */
+  }
+  const required = kind === "required";
+  await updateWindow({
+    id: `game-update-${lg.game.id}`,
+    title: required ? `${lg.game.title}: required update` : `${lg.game.title} ${inst.latest_version} is available`,
+    required,
+    reason: required ? (opts.requiredMessage ?? requiredGameText(lg.game.title, inst)) : null,
+    intro: `You have ${inst.version}. ${entries.length > 1 ? `Here is what changed in the ${entries.length} updates since then.` : "Here is what's new."} Your saves are kept.`,
+    entries,
+    onUpdate: () => run(() => api.update(lg.game.id)),
+  });
+}
+
+function launcherUpdateRequired(): boolean {
+  const u = S.launcherUpdate;
+  return Boolean(u && (u.mandatory || belowMinimum(S.info?.version ?? "0.0.0", S.info?.min_launcher_version)));
+}
+
+async function launcherUpdatePrompt(opts: { force?: boolean } = {}) {
+  const u = S.launcherUpdate;
+  if (!u || S.launcherUpdating) return;
+  const required = launcherUpdateRequired();
+  if (!opts.force && !prompts.shouldShow("launcher", u.version, required)) return;
+  if (document.querySelector('[data-id="launcher-update-prompt"]')) return;
+  await updateWindow({
+    id: "launcher-update-prompt",
+    title: required ? "Launcher: required update" : `Zirtola Launcher ${u.version} is available`,
+    required,
+    reason: required ? requiredLauncherText(u.version, u.mandatory_reason, belowMinimum(S.info?.version ?? "0.0.0", S.info?.min_launcher_version)) : null,
+    intro: `You have ${S.info?.version ?? "an older version"}. The launcher restarts to finish; your games and saves aren't touched.`,
+    entries: [{ version: u.version, released_at: u.date ?? "", notes: u.notes ?? "" }],
+    onUpdate: installLauncherUpdate,
+  });
+}
+
 function handleError(e: unknown) {
   if (errorCode(e) === "signed_out") {
     S.me = null;
@@ -964,7 +1082,9 @@ async function loadLibrary() {
 
 // ------------------------------------------------------------------ modals
 
-function modal(title: string, content: HTMLElement, opts: { onClose?: () => void } = {}) {
+// `locked`: a window that must be answered (a required update): no closing by
+// clicking outside, Escape or the gamepad's B button.
+function modal(title: string, content: HTMLElement, opts: { onClose?: () => void; locked?: boolean; id?: string } = {}) {
   const close = () => {
     backdrop.remove();
     opts.onClose?.();
@@ -973,9 +1093,10 @@ function modal(title: string, content: HTMLElement, opts: { onClose?: () => void
   };
   const backdrop = h(
     "div",
-    { class: "modal-backdrop", onclick: (e: Event) => { if (e.target === backdrop) close(); } },
-    h("div", { class: "modal", role: "dialog", "aria-modal": "true" }, h("h2", {}, title), content),
+    { class: "modal-backdrop", onclick: (e: Event) => { if (e.target === backdrop && !opts.locked) close(); } },
+    h("div", { class: "modal", role: "dialog", "aria-modal": "true", ...(opts.id ? { "data-id": opts.id } : {}) }, h("h2", {}, title), content),
   );
+  if (opts.locked) backdrop.dataset.locked = "1";
   (backdrop as HTMLElement & { close?: () => void }).close = close;
   document.body.append(backdrop);
   setTimeout(() => focusFirst(), 0);
@@ -985,6 +1106,7 @@ function modal(title: string, content: HTMLElement, opts: { onClose?: () => void
 function closeTopModal(): boolean {
   const all = document.querySelectorAll<HTMLElement & { close?: () => void }>(".modal-backdrop");
   const top = all[all.length - 1];
+  if (top?.dataset.locked) return true; // answered with its own buttons only
   if (top?.close) {
     top.close();
     return true;
@@ -1297,9 +1419,10 @@ onPlaytimeUpdated(() => refreshSoon(0));
 async function checkLauncherUpdate(manual = true) {
   try {
     const u = await api.checkLauncherUpdate();
-    S.launcherUpdate = u ? { version: u.version, notes: u.notes } : null;
-    if (manual) toast(u ? `Launcher ${u.version} is available.` : "The launcher is up to date.");
+    S.launcherUpdate = u;
     render();
+    if (u) void launcherUpdatePrompt({ force: manual });
+    else if (manual) toast("The launcher is up to date.");
   } catch (e) {
     if (manual) toast(`Could not check for updates: ${errorMessage(e)}`, "error");
   }
@@ -1629,12 +1752,12 @@ async function startupUpdateChecks() {
   const res = await runStartupChecks({
     currentVersion: S.info?.version ?? "0.0.0",
     minLauncherVersion: S.info?.min_launcher_version ?? null,
-    autoUpdateLauncher: S.settings?.auto_update_launcher ?? true,
-    autoUpdateGames: S.settings?.auto_update_games ?? true,
+    autoUpdateLauncher: S.settings?.auto_update_launcher ?? false,
+    autoUpdateGames: S.settings?.auto_update_games ?? false,
     signedIn: Boolean(S.me),
     checkLauncherUpdate: async () => {
       const u = await api.checkLauncherUpdate();
-      S.launcherUpdate = u ? { version: u.version, notes: u.notes } : null;
+      S.launcherUpdate = u;
       return u;
     },
     installLauncherUpdate: async () => {
@@ -1659,14 +1782,17 @@ async function startupUpdateChecks() {
   S.checkingUpdates = false;
   if (res.gamesChecked) S.lastUpdateCheck = res.checkedAt;
   S.updateNote = res.note;
-  if (res.launcherUpdateRequired && !res.launcherInstalling) {
-    toast(`This launcher version is no longer supported. Update to ${S.launcherUpdate?.version ?? "the latest version"} to keep playing online.`, "error");
-  }
   if (res.autoUpdating.length) {
     const names = res.autoUpdating.map((id) => S.library.find((g) => g.game.id === id)?.game.title ?? id);
     toast(`Updating ${names.join(", ")}.`);
   }
   render();
+  // Offer what was found, one window at a time: the launcher first.
+  if (res.launcherPrompt) await launcherUpdatePrompt();
+  for (const id of res.gamePrompts) {
+    const lg = S.library.find((g) => g.game.id === id);
+    if (lg) await gameUpdatePrompt(lg);
+  }
 }
 
 // Keep ownership and update status fresh: when the window regains focus (at

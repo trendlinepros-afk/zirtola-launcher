@@ -64,8 +64,10 @@ impl Default for Settings {
         Settings {
             library_dir: PathBuf::from(format!("{drive}\\Zirtola Games")),
             parallel_downloads: 8,
-            auto_update_launcher: true,
-            auto_update_games: true,
+            // Updates are offered with their changelog (Update now / Later)
+            // unless the player turns these on. Required updates can't wait.
+            auto_update_launcher: false,
+            auto_update_games: false,
             share_hardware_info: true,
             offer_crash_reports: true,
         }

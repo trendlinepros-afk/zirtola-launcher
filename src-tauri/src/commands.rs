@@ -119,6 +119,11 @@ pub struct InstallInfo {
     /// Version of an interrupted install/update that can be resumed.
     paused_version: Option<String>,
     folder_missing: bool,
+    /// The installed version is older than a required (mandatory) release:
+    /// it must update before Play.
+    update_required: bool,
+    min_version: Option<String>,
+    required_reason: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -196,6 +201,9 @@ pub async fn library(state: State<'_, AppState>) -> CmdResult<Vec<LibraryGame>> 
                     latest_version: None,
                     update_available: false,
                     paused_version: paused,
+                    update_required: false,
+                    min_version: None,
+                    required_reason: None,
                 })
             }
         };
@@ -242,6 +250,11 @@ pub async fn library(state: State<'_, AppState>) -> CmdResult<Vec<LibraryGame>> 
     for (i, r) in futures::future::join_all(checks).await {
         if let (Ok(latest), Some(inst)) = (r, out[i].install.as_mut()) {
             inst.update_available = inst.version.as_deref() != Some(latest.version.as_str());
+            if let (Some(min), Some(v)) = (latest.min_version.as_deref(), inst.version.as_deref()) {
+                inst.update_required = zirtola_core::api::compare_versions(v, min) == std::cmp::Ordering::Less;
+            }
+            inst.min_version = latest.min_version.clone();
+            inst.required_reason = latest.mandatory_reason.clone().filter(|r| !r.is_empty());
             inst.latest_version = Some(latest.version);
         }
     }
@@ -502,12 +515,20 @@ pub async fn launch_game(
     let device_id = state.device_id();
     // A hardware label, not the computer name (which often contains the user's name).
     let device_name = state.device_label();
+    let branch = state
+        .registry
+        .lock()
+        .await
+        .get(&game_id)
+        .map(|r| r.branch.clone())
+        .unwrap_or_else(|| "live".into());
+    let version = m.version.clone();
     let token = state
         .authed(|at| {
             let api = state.api.clone();
             let gid = game_id.clone();
-            let (did, dname) = (device_id.clone(), device_name.clone());
-            async move { api.launch_token(&at, &gid, &did, &dname).await }
+            let (did, dname, ver, br) = (device_id.clone(), device_name.clone(), version.clone(), branch.clone());
+            async move { api.launch_token(&at, &gid, &did, &dname, &ver, &br).await }
         })
         .await?;
     // The run's playtime id, also given to the game so its career-stats
@@ -694,6 +715,9 @@ pub struct LauncherUpdate {
     version: String,
     notes: Option<String>,
     date: Option<String>,
+    /// A required launcher update (release record "mandatory"): no "Later".
+    mandatory: bool,
+    mandatory_reason: Option<String>,
 }
 
 /// The launcher's own update feed is on the website, for signed-in accounts
@@ -727,6 +751,8 @@ pub async fn check_launcher_update(app: AppHandle, state: State<'_, AppState>) -
             version: u.version.clone(),
             notes: u.body.clone(),
             date: u.date.map(|d| d.to_string()),
+            mandatory: u.raw_json.get("mandatory").and_then(|v| v.as_bool()).unwrap_or(false),
+            mandatory_reason: u.raw_json.get("mandatory_reason").and_then(|v| v.as_str()).map(str::to_string).filter(|s| !s.is_empty()),
         })),
         Ok(None) => Ok(None),
         Err(e) => Err(CmdError::new("updater", e.to_string())),

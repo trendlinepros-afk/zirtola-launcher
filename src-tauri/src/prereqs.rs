@@ -443,7 +443,7 @@ async fn download_vcredist(
 /// Authenticode must be valid and signed by Microsoft Corporation.
 fn verify_microsoft_signature(path: &Path) -> Result<(), String> {
     let out = powershell(
-        "$s = Get-AuthenticodeSignature -LiteralPath $env:ZIRTOLA_FILE; Write-Output ('{0}|{1}' -f $s.Status, $s.SignerCertificate.Subject)",
+        "Import-Module Microsoft.PowerShell.Security; $s = Get-AuthenticodeSignature -LiteralPath $env:ZIRTOLA_FILE; Write-Output ('{0}|{1}' -f $s.Status, $s.SignerCertificate.Subject)",
         path,
     )
     .map_err(|e| format!("Couldn't check the installer's signature: {e}"))?;
@@ -453,7 +453,8 @@ fn verify_microsoft_signature(path: &Path) -> Result<(), String> {
         Ok(())
     } else {
         let _ = std::fs::remove_file(path).ok().filter(|_| path.starts_with(std::env::temp_dir()));
-        Err(format!("The installer isn't validly signed by Microsoft ({status}), so it was not run."))
+        let why = if status.is_empty() { String::from_utf8_lossy(&out.stderr).lines().next().unwrap_or("no result").trim().to_string() } else { status.to_string() };
+        Err(format!("The installer isn't validly signed by Microsoft ({why}), so it was not run."))
     }
 }
 
@@ -474,8 +475,12 @@ async fn run_elevated(path: &Path, args: &[&str]) -> Result<i32, String> {
 
 fn powershell(script: &str, file: &Path) -> std::io::Result<std::process::Output> {
     let mut cmd = std::process::Command::new("powershell.exe");
+    // Windows PowerShell 5.1 started from PowerShell 7 inherits PS7's module
+    // path and then can't load its own Security module (Get-AuthenticodeSignature):
+    // give it its default module path.
     cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
-        .env("ZIRTOLA_FILE", file);
+        .env("ZIRTOLA_FILE", file)
+        .env_remove("PSModulePath");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

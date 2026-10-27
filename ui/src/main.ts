@@ -11,6 +11,9 @@ import {
   onJobFinished,
   onJobProgress,
   onLauncherUpdateProgress,
+  onPrereqProgress,
+  type PrereqItem,
+  type PrereqProgress,
   type AppInfo,
   type CatalogGame,
   type CmdError,
@@ -25,6 +28,7 @@ import { focusFirst, onGamepadActive, onNavAction } from "./nav";
 import { buyUrl, openLink, storeUrl } from "./links";
 import { needsRecheck, runStartupChecks } from "./startup";
 import { parseNotes } from "./notes";
+import { blocking, installable, installLine, playBlockedReason } from "./requirements";
 
 // Open a website link; on failure (no URL yet, browser blocked) tell the player.
 function openSite(url: string | null | undefined, what: string) {
@@ -33,7 +37,7 @@ function openSite(url: string | null | undefined, what: string) {
 
 // ------------------------------------------------------------------ state
 
-type View = "library" | "settings";
+type View = "library" | "settings" | "requirements";
 
 const S = {
   info: null as AppInfo | null,
@@ -52,6 +56,9 @@ const S = {
   // Update checks: when the last one succeeded, and a small note if it couldn't run.
   lastUpdateCheck: null as number | null,
   checkingUpdates: false,
+  // Requirements (prereqs.rs): last check, and the open requirements screen.
+  prereqs: null as PrereqItem[] | null,
+  req: null as null | { game: string | null; thenPlay: boolean; installing: boolean; checking: boolean; progress: Map<string, PrereqProgress>; errors: Map<string, string> },
   updateNote: null as string | null,
   gamepad: false,
   // Purchases the player started from the launcher: game id -> start time.
@@ -142,7 +149,7 @@ function hints(): HTMLElement | null {
 function body() {
   if (!S.booted) return h("main", { class: "boot" }, h("div", { class: "spinner" }));
   if (!S.me) return signInScreen();
-  return h("div", { class: "shell" }, sidebar(), h("main", { class: "content" }, S.view === "settings" ? settingsView() : libraryView()));
+  return h("div", { class: "shell" }, sidebar(), h("main", { class: "content" }, S.view === "settings" ? settingsView() : S.view === "requirements" ? requirementsView() : libraryView()));
 }
 
 // ------------------------------------------------------------------ sign in
@@ -480,9 +487,9 @@ function actions(lg: LibraryGame) {
   if (inst.update_available || inst.paused_version) {
     const label = inst.paused_version ? `Resume update to ${inst.paused_version}` : `Update to ${inst.latest_version}`;
     row.append(btn("update", label, () => run(() => api.update(g.id)), { cls: "primary big", icon: icons.update }));
-    row.append(btn("play", "Play", () => launch(g), { cls: "ghost big", icon: icons.play }));
+    row.append(...playButton(g, "ghost big"));
   } else {
-    row.append(btn("play", "Play", () => launch(g), { cls: "primary big play", icon: icons.play }));
+    row.append(...playButton(g, "primary big play"));
   }
   if (lg.branches.includes("beta")) {
     const onBeta = lg.branch === "beta";
@@ -501,6 +508,17 @@ function actions(lg: LibraryGame) {
     btn("uninstall", "", () => confirmUninstall(lg), { cls: "ghost square", icon: icons.trash, title: "Uninstall" }),
   );
   return row;
+}
+
+// Play, or a disabled Play (with the reason as a tooltip) plus Requirements
+// while something the game needs is missing.
+function playButton(g: CatalogGame, cls: string): HTMLElement[] {
+  const reason = playBlockedReason(S.prereqs);
+  if (!reason) return [btn("play", "Play", () => launch(g), { cls, icon: icons.play })];
+  return [
+    h("span", { class: "disabled-wrap", title: reason }, btn("play", "Play", () => {}, { cls, icon: icons.play, disabled: true, title: reason })),
+    btn("open-requirements", "Requirements", () => openRequirements(g.id, true), { cls: "ghost big", icon: icons.cross, title: "See what's missing and fix it" }),
+  ];
 }
 
 // ------------------------------------------------------------------ buying
@@ -665,6 +683,11 @@ async function run(fn: () => Promise<unknown>) {
 }
 
 async function launch(g: CatalogGame) {
+  const items = await refreshPrereqs(g.id);
+  if (blocking(items).length) {
+    openRequirements(g.id, true);
+    return;
+  }
   // Re-check for a game update if the last check is more than ~10 minutes old.
   if (S.me && needsRecheck(S.lastUpdateCheck, Date.now())) {
     await loadLibrary();
@@ -1294,6 +1317,187 @@ async function installLauncherUpdate() {
   }
 }
 
+// ------------------------------------------------------------------ requirements
+
+// What a game needs on this PC (src-tauri/src/prereqs.rs). Shown on the first
+// start and before a launch whenever something is missing. Nothing is
+// installed until the player clicks "Install the missing components".
+const REQ_SEEN_KEY = "zirtola.requirementsSeen";
+
+function requirementsSeen(): boolean {
+  try {
+    return localStorage.getItem(REQ_SEEN_KEY) === "1";
+  } catch {
+    return true;
+  }
+}
+
+function markRequirementsSeen() {
+  try {
+    localStorage.setItem(REQ_SEEN_KEY, "1");
+  } catch {
+    /* fine */
+  }
+}
+
+async function refreshPrereqs(gameId: string | null): Promise<PrereqItem[] | null> {
+  const lg = gameId ? S.library.find((g) => g.game.id === gameId) : null;
+  const need = lg && !lg.install ? lg.game.install_size ?? null : null;
+  try {
+    S.prereqs = await api.prereqsCheck(gameId, need);
+  } catch (e) {
+    toast(`Couldn't check this PC: ${errorMessage(e)}`, "error");
+  }
+  return S.prereqs;
+}
+
+function openRequirements(gameId: string | null, thenPlay = false) {
+  S.req = { game: gameId, thenPlay, installing: false, progress: new Map(), errors: new Map(), checking: true };
+  S.view = "requirements";
+  render();
+  void refreshPrereqs(gameId).then(() => {
+    if (S.req) S.req.checking = false;
+    render();
+    focusFirst();
+  });
+}
+
+function closeRequirements() {
+  markRequirementsSeen();
+  S.req = null;
+  S.view = "library";
+  render();
+  focusFirst();
+}
+
+async function installMissing(ids: string[]) {
+  if (!S.req || !ids.length) return;
+  S.req.installing = true;
+  for (const id of ids) {
+    S.req.errors.delete(id);
+    S.req.progress.delete(id);
+  }
+  render();
+  try {
+    await api.prereqsInstall(ids, S.req.game);
+  } catch {
+    /* the failing item's row shows the error (prereq-progress "error") */
+  }
+  if (!S.req) return;
+  S.req.installing = false;
+  S.req.checking = true;
+  render();
+  await refreshPrereqs(S.req.game);
+  if (S.req) S.req.checking = false;
+  render();
+  focusFirst();
+}
+
+function requirementsView() {
+  const r = S.req;
+  const game = r?.game ? S.library.find((g) => g.game.id === r.game)?.game ?? null : null;
+  const items = S.prereqs ?? [];
+  const missing = installable(items);
+  const blockers = blocking(items);
+  const advisory = blockers.filter((i) => !i.fixable);
+  const title = game ? `${game.title}: what it needs` : "What your games need";
+
+  const row = (i: PrereqItem) => {
+    const ok = i.status === "ok";
+    const p = r?.progress.get(i.id);
+    const err = r?.errors.get(i.id);
+    const pct = p && p.total ? Math.min(100, (p.done / p.total) * 100) : p?.phase === "install" || p?.phase === "verify" ? 100 : 0;
+    return h(
+      "div",
+      { class: `req-row ${ok ? "ok" : "bad"}`, "data-req": i.id },
+      h("span", { class: "req-mark", "aria-label": ok ? "Installed" : "Missing", html: ok ? icons.check : icons.cross }),
+      h(
+        "div",
+        { class: "req-text" },
+        h("strong", {}, i.name),
+        h("small", {}, i.description),
+        h("span", { class: "req-found" }, i.found),
+        !ok && i.advice
+          ? h(
+              "p",
+              { class: "req-advice" },
+              i.advice,
+              " ",
+              i.advice_url ? h("a", { href: "#", "data-id": `advice-${i.id}`, onclick: (e: Event) => { e.preventDefault(); void openSite(i.advice_url, "help page"); } }, i.id === "gpu" ? "Driver downloads" : "How to") : null,
+            )
+          : null,
+        p && !err && p.phase !== "done"
+          ? h(
+              "div",
+              { class: "req-progress" },
+              h("div", { class: "bar" }, h("div", { class: `fill ${p.phase === "install" ? "pulse" : ""}`, style: `width:${pct}%` })),
+              h("small", {}, `${p.message ?? p.phase}${p.total && p.phase === "download" ? ` · ${fmt.bytes(p.done)} of ${fmt.bytes(p.total)}` : ""}`),
+            )
+          : null,
+        err
+          ? h(
+              "div",
+              { class: "req-error" },
+              h("p", { class: "error-text" }, err),
+              h(
+                "div",
+                { class: "req-error-actions" },
+                btn(`retry-${i.id}`, "Retry", () => void installMissing([i.id]), { cls: "primary", disabled: r?.installing }),
+                i.manual_url ? btn(`manual-${i.id}`, "Install it yourself from Microsoft", () => void openSite(i.manual_url, "Microsoft download page"), { cls: "ghost", icon: icons.external }) : null,
+              ),
+            )
+          : null,
+      ),
+    );
+  };
+
+  const busy = r?.installing || r?.checking;
+  let footer: HTMLElement | null = null;
+  if (!busy && missing.length && !missing.some((i) => r?.errors.has(i.id))) {
+    footer = h(
+      "div",
+      { class: "req-ask", "data-id": "req-ask" },
+      h("strong", {}, "Install the missing components?"),
+      h("p", { class: "muted" }, "The launcher will install:"),
+      h("ul", {}, ...missing.map((i) => h("li", {}, installLine(i)))),
+      h("p", { class: "muted small" }, "These come straight from Microsoft and are checked for Microsoft's signature before they run. Windows will then ask for permission to make changes to your PC: that is Windows' own prompt, click Yes."),
+      h(
+        "div",
+        { class: "modal-actions" },
+        btn("req-cancel", "Cancel", closeRequirements, { cls: "ghost" }),
+        btn("req-install", "Install the missing components", () => void installMissing(missing.map((i) => i.id)), { cls: "primary" }),
+      ),
+    );
+  } else if (!busy && !blockers.length && items.length) {
+    footer = h(
+      "div",
+      { class: "req-done" },
+      h("p", {}, h("span", { class: "ok-text" }, "All set."), " Everything the game needs is on this PC."),
+      r?.thenPlay && game
+        ? btn("req-play", `Play ${game.title}`, () => { closeRequirements(); void launch(game); }, { cls: "primary big play", icon: icons.play })
+        : btn("req-continue", "Continue", closeRequirements, { cls: "primary" }),
+    );
+  } else if (!busy && advisory.length) {
+    footer = h(
+      "div",
+      { class: "req-done" },
+      h("p", { class: "muted" }, "The items in red can't be installed by the launcher. Follow the advice next to them, then check again."),
+      h("div", { class: "modal-actions" }, btn("req-back", "Back to the library", closeRequirements, { cls: "ghost" }), btn("req-recheck", "Check again", () => openRequirements(r?.game ?? null, r?.thenPlay ?? false), { cls: "primary" })),
+    );
+  }
+
+  return h(
+    "div",
+    { class: "settings requirements" },
+    h("h1", {}, title),
+    h("p", { class: "muted" }, "The launcher checks these before you play. Anything missing is listed in red; it can install what's safe to install, with your permission."),
+    r?.checking && !items.length ? h("div", { class: "waiting" }, h("div", { class: "spinner small" }), h("span", {}, "Checking this PC…")) : null,
+    h("div", { class: "req-list" }, ...items.map(row)),
+    r?.checking && items.length ? h("p", { class: "muted small" }, "Checking again…") : null,
+    footer,
+  );
+}
+
 // ------------------------------------------------------------------ toasts
 
 function toast(text: string, kind: "info" | "error" = "info") {
@@ -1313,6 +1517,10 @@ function toast(text: string, kind: "info" | "error" = "info") {
 onNavAction((a) => {
   if (a === "back") {
     if (closeTopModal()) return;
+    if (S.view === "requirements") {
+      if (!S.req?.installing) closeRequirements();
+      return;
+    }
     if (S.view !== "library") {
       S.view = "library";
       render();
@@ -1365,6 +1573,13 @@ onJobFinished(async (f) => {
   else render();
 });
 
+onPrereqProgress((p) => {
+  if (!S.req) return;
+  S.req.progress.set(p.id, p);
+  if (p.phase === "error") S.req.errors.set(p.id, p.message ?? "Install failed.");
+  render();
+});
+
 onLauncherUpdateProgress((p) => {
   S.launcherUpdating = p;
   render();
@@ -1396,6 +1611,9 @@ async function boot() {
   }
   S.booted = true;
   await startupUpdateChecks();
+  await refreshPrereqs(selectedGame()?.owned ? S.selected : null);
+  if (!requirementsSeen()) openRequirements(selectedGame()?.owned ? S.selected : null);
+  render();
   focusFirst();
   if (S.pending.size) schedulePurchasePoll();
   if (S.me) api.pendingCrashes().then((list) => list.forEach(queueCrash)).catch(() => undefined);

@@ -161,6 +161,7 @@ sign-in information → Add a user without a Microsoft account** → name `Teste
 | B4 | Open the downloaded installer. | Blue **Windows protected your PC**. Click **More info**: App = `Zirtola.Launcher_0.2.0_x64-setup.exe`, Publisher = **Unknown publisher**. Click **Run anyway**. (The same screens as on www.zirtola.com/help/installing-on-windows.) |
 | B5 | Installer: **Next** → keep the folder → **Install** → **Finish**. | No administrator prompt (it installs for this Windows user only). The launcher opens: "Sign in to Zirtola". |
 | B6 | **Sign in with your browser**. | Edge opens zirtola.com: sign in as the test account, then **Sign in to the launcher**. The page says "You're signed in". Back in the launcher: Dirt Digger in the library, "Granted by the studio", **Install**. A short "Checking for updates…" line may show at the top. |
+| B6b | (First start only) the launcher shows **Dirt Digger: what it needs**. | Four rows: Windows, Microsoft Visual C++ Runtime, graphics card (DirectX 12, Shader Model 6), free disk space. On a new user account of your PC they're all green: click **Continue**. On a brand-new PC the runtime may be red: click **Install the missing components**, then **Yes** on Windows' prompt; the row turns green. |
 | B7 | Click the key button (tooltip **View license key**). | "This game is tied to your Zirtola account. No key needed.", From: Gift from the studio, Activation: not active on any PC yet. **Close**. |
 | B8 | **Install** → keep `C:\Zirtola Games\Dirt Digger` → **Install**. Halfway, click **Pause**, wait, then **Resume install**. | Progress with MB, speed and time left; Pause shows "paused, resume any time"; Resume carries on from where it stopped. 423 MB in total. "Dirt Digger is installed." |
 | B9 | Click the checkmark button (**Verify and repair files**). | "All 30 files are intact." |
@@ -177,6 +178,7 @@ sign-in information → Add a user without a Microsoft account** → name `Teste
   <https://www.zirtola.com/api/launcher/v1/config> shows JSON.
 - **Install fails with "Downloads aren't configured yet"**: A3 isn't deployed yet.
 - **"chunk … is missing on the server"**: A5 didn't finish uploading; run it again.
-- **The game doesn't start on a brand-new PC** (not just a new user account):
-  it may need the Microsoft Visual C++ Redistributable 2015–2022 (x64). The
-  launcher doesn't install it yet; that's a known gap.
+- **A red row on the requirements screen**: the runtime can be installed from
+  there (with your permission and Windows' prompt). Windows, graphics card and
+  disk space can't; the row says what to do (update Windows or the graphics
+  driver, free up space).

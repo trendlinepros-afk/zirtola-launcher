@@ -11,12 +11,15 @@ into chat, a repo or a screenshot.
 
 ## Part A: one-time setup
 
-### A1. Merge the two pull requests
+### A1. Merge the pull requests
 
-1. Website: open <https://github.com/trendlinepros-afk/retail-store/pull/26> (`launcher-downloads` → `claude/app-marketplace-platform-cpyvmr`)
-   → **Merge pull request** → **Confirm merge**. Railway redeploys the site by
-   itself (2–4 minutes). It adds the download route; no database changes.
-2. Launcher: open <https://github.com/trendlinepros-afk/zirtola-launcher/pull/3> (`launcher-ready` → `main`) → **Merge pull request** → **Confirm merge**.
+1. Website: <https://github.com/trendlinepros-afk/retail-store/pull/28> (owner-only
+   launcher downloads) → **Merge pull request** → **Confirm merge**. Railway
+   redeploys the site by itself (2–4 minutes). No database changes.
+2. Launcher: <https://github.com/trendlinepros-afk/zirtola-launcher/pull/5>
+   → **Merge pull request** → **Confirm merge**.
+3. If the website service still has a `LAUNCHER_DOWNLOAD_URL` variable, delete it
+   (Variables tab → ⋮ → Remove); it isn't used any more.
 
 ### A2. Create the storage bucket on Railway
 

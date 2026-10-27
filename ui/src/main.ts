@@ -973,7 +973,7 @@ function changelogList(entries: NoteEntry[]) {
           h("strong", {}, en.version),
           en.channel === "beta" ? h("span", { class: "pill beta" }, "Beta") : null,
           en.mandatory ? h("span", { class: "pill required", title: en.mandatory_reason ?? "" }, "Required") : null,
-          en.released_at ? h("small", {}, new Date(en.released_at).toLocaleDateString()) : null,
+          en.released_at && !Number.isNaN(Date.parse(en.released_at)) ? h("small", {}, new Date(en.released_at).toLocaleDateString()) : null,
         ),
         renderNotes(en.notes || "No notes for this version."),
       ),

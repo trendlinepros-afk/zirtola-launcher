@@ -103,3 +103,10 @@ test("versions and staleness", () => {
   assert.equal(needsRecheck(0, 9 * 60_000), false);
   assert.equal(needsRecheck(0, 11 * 60_000), true);
 });
+
+test("only the launcher check failing: games still count as checked", async () => {
+  const { d } = deps({ checkLauncherUpdate: async () => { throw new Error("no release yet"); } });
+  const r = await runStartupChecks(d);
+  assert.equal(r.gamesChecked, true);
+  assert.match(r.note!, /launcher update/);
+});

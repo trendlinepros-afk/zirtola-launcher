@@ -34,7 +34,7 @@ See docs/SIGNING.md. Until it is set up, releases build fine but unsigned.
 
 ### 3. Point release builds at the website
 
-Repository variable `ZIRTOLA_API_BASE` = `https://zirtola.com/api/launcher`
+Repository variable `ZIRTOLA_API_BASE` = `https://www.zirtola.com/api/launcher` (optional; it is the default. Always `www`: the bare domain only forwards its front page)
 (this is also the default when the variable is unset).
 
 ### 4. Pin the production public keys
@@ -111,7 +111,7 @@ then resolves to the previous published release.
 4. Register the manifest on the website: Studio → Licensing → Launcher
    catalogue → the game → **Add a build** (upload the `.json`), or from CI:
    ```bash
-   curl -X POST https://zirtola.com/api/launcher/v1/admin/builds \
+   curl -X POST https://www.zirtola.com/api/launcher/v1/admin/builds \
      -H "Authorization: Bearer $LAUNCHER_PUBLISH_TOKEN" -H "Content-Type: application/json" \
      -d "{\"signed_manifest\": $(cat 1.2.0.json), \"notes\": \"Patch notes\", \"make_live\": true}"
    ```

@@ -11,7 +11,7 @@ checks a running website (local or staging).
 
 ## Conventions
 
-- **API base** (`{base}`): `https://zirtola.com/api/launcher` in production,
+- **API base** (`{base}`): `https://www.zirtola.com/api/launcher` in production,
   `http://127.0.0.1:8787` for the mock. Baked into release builds via the
   `ZIRTOLA_API_BASE` build variable; dev builds also honour it at runtime.
 - JSON everywhere except the OAuth token/revoke endpoints (form-encoded, RFC 6749).
@@ -43,9 +43,9 @@ Service discovery. The launcher calls this first.
 ```json
 {
   "issuer": "https://zirtola.com",
-  "authorization_endpoint": "https://zirtola.com/oauth/authorize",
-  "token_endpoint": "https://zirtola.com/oauth/token",
-  "revocation_endpoint": "https://zirtola.com/oauth/revoke",
+  "authorization_endpoint": "https://www.zirtola.com/oauth/authorize",
+  "token_endpoint": "https://www.zirtola.com/oauth/token",
+  "revocation_endpoint": "https://www.zirtola.com/oauth/revoke",
   "device_authorization_endpoint": null,
   "client_id": "zirtola-launcher",
   "scopes": ["launcher", "offline_access"],

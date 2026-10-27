@@ -13,7 +13,7 @@ When the launcher starts a game it:
 | `ZIRTOLA_SESSION_TOKEN` | the launch token |
 | `ZIRTOLA_GAME_ID` | e.g. `dirt-simulator` |
 | `ZIRTOLA_GAME_VERSION` | installed version, e.g. `1.2.0` |
-| `ZIRTOLA_API_BASE` | e.g. `https://zirtola.com/api/launcher` |
+| `ZIRTOLA_API_BASE` | e.g. `https://www.zirtola.com/api/launcher` |
 
 The token goes in the environment, not the command line, so it does not show
 up in process listings or crash reports.
@@ -74,7 +74,7 @@ void ZirtolaLicense::Check(const FString& ExpectedGameId, FOnZirtolaLicense OnDo
     }
     if (Api.IsEmpty())
     {
-        Api = TEXT("https://zirtola.com/api/launcher");
+        Api = TEXT("https://www.zirtola.com/api/launcher");
     }
 
     TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
@@ -166,7 +166,7 @@ site. In the packaged game's `Engine/Programs/CrashReportClient/Config/DefaultEn
 ```ini
 [CrashReportClient]
 bAgreeToCrashUpload=false
-DataRouterUrl="https://zirtola.com/api/crash/ue?key=<game crash key>"
+DataRouterUrl="https://www.zirtola.com/api/crash/ue?key=<game crash key>"
 ```
 
 CrashReportClient shows its own dialog and posts a compressed archive of the
@@ -179,7 +179,7 @@ console command in a test build) and checking Studio → Crash reports.
 zip the newest folder under `Saved/Crashes` and post it:
 
 ```
-POST https://zirtola.com/api/crash/upload?key=<game crash key>
+POST https://www.zirtola.com/api/crash/upload?key=<game crash key>
 Content-Type: multipart/form-data
   metadata = {"game_version":"1.2.0","build_id":"…","comment":"","launch_token":"<ZIRTOLA_SESSION_TOKEN if started by the launcher>"}
   file     = crash.zip

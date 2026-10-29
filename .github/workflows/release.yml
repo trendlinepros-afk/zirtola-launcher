@@ -5,6 +5,9 @@ name: Release
 # launcher/0.2.1/. Players don't get it yet: nothing is published on GitHub,
 # and the bucket's pointer (launcher/latest.json) still names the old version.
 #
+# Without a tag: Actions -> Release -> Run workflow -> "build" = 0.2.1 builds
+# and uploads the same way from the chosen branch.
+#
 # To make it live (or to roll back): Actions -> Release -> Run workflow ->
 # "promote" = 0.2.1 (or the older version). That rewrites the pointer; the
 # website serves it within a minute. See docs/RELEASING.md.
@@ -19,7 +22,10 @@ on:
     inputs:
       promote:
         description: "Version to make live, e.g. 0.2.1 (it must already be uploaded). Use an older version to roll back."
-        required: true
+        required: false
+      build:
+        description: "Or: build and upload this version from main without pushing a tag, e.g. 0.2.1 (must match package.json)."
+        required: false
 
 permissions:
   contents: read
@@ -30,7 +36,7 @@ concurrency:
 
 jobs:
   promote:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.promote != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,10 +56,12 @@ jobs:
           node scripts/launcher-bucket.mjs list
 
   release:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.build != '')
     runs-on: windows-latest
     timeout-minutes: 45
     env:
+      # The tag being released: the pushed tag, or v<build> for a manual build.
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || format('v{0}', inputs.build) }}
       # Authenticode signing (scripts/sign.ps1). Unset = unsigned build.
       ZIRTOLA_SIGN_MODE: ${{ vars.ZIRTOLA_SIGN_MODE }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -74,7 +82,7 @@ jobs:
           BUCKET: ${{ secrets.LAUNCHER_BUCKET_NAME }}
         run: |
           $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ("v$v" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} does not match package.json version $v" }
+          if ("v$v" -ne $env:RELEASE_TAG) { throw "Version $env:RELEASE_TAG does not match package.json version $v" }
           if (-not (Test-Path "release-notes/$v.md")) { throw "Missing release-notes/$v.md: write the release notes before tagging" }
           if (-not $env:KEY) { throw "Add the TAURI_SIGNING_PRIVATE_KEY secret (see docs/RELEASING.md)" }
           if (-not $env:BUCKET) { throw "Add the LAUNCHER_BUCKET_* secrets (see docs/RELEASING.md)" }
@@ -126,7 +134,7 @@ jobs:
           LAUNCHER_BUCKET_SECRET_ACCESS_KEY: ${{ secrets.LAUNCHER_BUCKET_SECRET_ACCESS_KEY }}
           LAUNCHER_BUCKET_PATH_STYLE: ${{ vars.LAUNCHER_BUCKET_PATH_STYLE }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           node scripts/launcher-bucket.mjs upload --version "$version"
           node scripts/launcher-bucket.mjs list
           {
@@ -139,7 +147,7 @@ jobs:
       # Internal archive only (needs repo access; deleted after 30 days).
       - uses: actions/upload-artifact@v4
         with:
-          name: zirtola-launcher-${{ github.ref_name }}
+          name: zirtola-launcher-${{ env.RELEASE_TAG }}
           path: |
             target/release/bundle/nsis/*-setup.exe
             target/release/bundle/nsis/*-setup.exe.sig

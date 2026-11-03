@@ -13,6 +13,7 @@ type Dir = "up" | "down" | "left" | "right";
 let actionHandler: (a: NavAction) => void = () => {};
 let gamepadListeners: ((active: boolean) => void)[] = [];
 let gamepadActive = false;
+const restAxes = new Map<number, [number, number]>();   // each pad's stick where it rested when first read
 
 export function onNavAction(h: (a: NavAction) => void) {
   actionHandler = h;
@@ -147,11 +148,16 @@ function held(key: string, down: boolean, now: number): boolean {
 }
 
 function poll(now: number) {
+  // Only a pad with the standard layout drives the launcher. A flight stick, wheel or throttle (listed first on many
+  // setups) reports axes resting at full travel, which read as a stick held over: every mouse move put the launcher in
+  // keyboard mode and the next frame put it back in controller mode, and the controls bar flickered between the two.
   const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) as Gamepad[] : [];
-  const gp = pads[0];
+  const gp = pads.find((p) => p.mapping === "standard");
   if (gp && document.hasFocus()) {
-    const ax = gp.axes[0] ?? 0;
-    const ay = gp.axes[1] ?? 0;
+    // (and a stick counts only once it has moved off where it rested: a pad with drift doesn't hold a direction)
+    const rest = restAxes.get(gp.index) ?? (restAxes.set(gp.index, [gp.axes[0] ?? 0, gp.axes[1] ?? 0]), restAxes.get(gp.index)!);
+    const ax = Math.abs((gp.axes[0] ?? 0) - rest[0]) > 0.3 ? gp.axes[0] ?? 0 : 0;
+    const ay = Math.abs((gp.axes[1] ?? 0) - rest[1]) > 0.3 ? gp.axes[1] ?? 0 : 0;
     const dirs: [Dir, boolean][] = [
       ["up", pressed(gp, BTN.UP) || ay < -0.55],
       ["down", pressed(gp, BTN.DOWN) || ay > 0.55],
@@ -191,6 +197,6 @@ function poll(now: number) {
   requestAnimationFrame(poll);
 }
 
-window.addEventListener("gamepadconnected", () => setGamepadActive(true));
+window.addEventListener("gamepadconnected", (e) => { if ((e as GamepadEvent).gamepad.mapping === "standard") setGamepadActive(true); });
 window.addEventListener("gamepaddisconnected", () => setGamepadActive(false));
 requestAnimationFrame(poll);

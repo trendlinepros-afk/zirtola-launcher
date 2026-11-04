@@ -12,9 +12,9 @@
 // bucket under launcher/<version>/. Promoting it (Actions -> Release -> Run
 // workflow, or scripts/launcher-bucket.mjs promote) makes zirtola.com serve it.
 
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");

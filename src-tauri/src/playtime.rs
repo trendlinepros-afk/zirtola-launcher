@@ -39,6 +39,8 @@ static PENDING_LOCK: Mutex<()> = Mutex::new(());
 static FLUSHING: AtomicBool = AtomicBool::new(false);
 /// The website's latest totals for the signed-in player.
 static TOTALS: Mutex<Vec<GamePlaytime>> = Mutex::new(Vec::new());
+/// And their career totals per game (gold mined, grams), from the same reply.
+static CAREER: Mutex<Vec<zirtola_core::api::GameCareer>> = Mutex::new(Vec::new());
 
 fn pending_path(state: &AppState) -> PathBuf {
     state.data_dir.join("playtime-pending.json")
@@ -213,6 +215,7 @@ pub async fn active_seconds(state: &AppState) -> HashMap<String, u64> {
         .await;
     if let Ok(p) = fetched {
         *TOTALS.lock().unwrap() = p.games;
+        *CAREER.lock().unwrap() = p.career;
     }
     let mut out: HashMap<String, u64> = TOTALS
         .lock()
@@ -228,6 +231,14 @@ pub async fn active_seconds(state: &AppState) -> HashMap<String, u64> {
         *out.entry(q.report.game_id.clone()).or_default() += q.report.active_seconds;
     }
     out
+}
+
+/// Gold mined per game (grams) for the signed-in player, as of the last totals fetched by `active_seconds`.
+pub async fn gold_mined_g(state: &AppState) -> HashMap<String, f64> {
+    if current_user(state).await.is_none() {
+        return HashMap::new();
+    }
+    CAREER.lock().unwrap().iter().map(|c| (c.game_id.clone(), c.gold_mined_g)).collect()
 }
 
 pub async fn current_user(state: &AppState) -> Option<String> {

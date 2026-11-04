@@ -249,10 +249,23 @@ pub struct GamePlaytime {
     pub last_played_at: Option<String>,
 }
 
+/// A game's career totals as the game itself reported them to the website (gold in grams).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GameCareer {
+    pub game_id: String,
+    #[serde(default)]
+    pub gold_mined_g: f64,
+    #[serde(default)]
+    pub material_moved_m3: f64,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Playtime {
     #[serde(default)]
     pub games: Vec<GamePlaytime>,
+    /// Career totals per game, for the games that report them (absent from older websites).
+    #[serde(default)]
+    pub career: Vec<GameCareer>,
     /// Per-report outcome of a POST (absent on GET).
     #[serde(default)]
     pub results: Vec<PlaytimeResult>,

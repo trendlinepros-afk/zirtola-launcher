@@ -30,6 +30,14 @@ export function hoursPlayed(h: number | null | undefined): string {
   return `${text} ${v === 1 ? "hour" : "hours"} played`;
 }
 
+/** "12.40 g of gold mined" under a troy ounce, "3.27 oz of gold mined" from one up. */
+export function goldMined(g: number | null | undefined): string {
+  const v = g != null && isFinite(g) && g > 0 ? g : 0;
+  const OZT = 31.1034768;
+  return v >= OZT ? `${(v / OZT).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} oz of gold mined`
+    : `${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} g of gold mined`;
+}
+
 export function price(p: { amount: number; currency: string } | null | undefined): string {
   if (!p || !Number.isFinite(p.amount)) return "";
   try {

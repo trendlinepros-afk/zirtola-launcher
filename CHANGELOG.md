@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Gold mined on the game page**, next to hours played (career total the game
+  reports to the website; shown once there is some).
+- **The library shows your games and the ones on sale.** A game that isn't on
+  sale yet appears only for players who own it (key, grant or early access).
+- **No more flickering with racing wheels, pedals or flight sticks.** Only a
+  standard controller switches the launcher into controller mode, and a stick
+  counts only once it moves off where it rests, so the controls bar no longer
+  flashes between controller and keyboard mode as the mouse moves.
 - **Update prompts.** A new launcher or game version opens a window with the
   release notes of every version since the installed one and **Update now** /
   **Later** (Later = not again this session; the update button stays).

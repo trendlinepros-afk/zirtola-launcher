@@ -141,6 +141,8 @@ pub struct LibraryGame {
     playtime_seconds: u64,
     /// The same, rounded down to the quarter hour.
     hours_played: f64,
+    /// Gold mined in this game over the player's career (grams), when the game reports it.
+    gold_mined_g: Option<f64>,
 }
 
 #[tauri::command]
@@ -181,6 +183,7 @@ pub async fn library(state: State<'_, AppState>) -> CmdResult<Vec<LibraryGame>> 
     }
     let registry = state.registry.lock().await.installs.clone();
     let played = crate::playtime::active_seconds(&state).await;
+    let gold = crate::playtime::gold_mined_g(&state).await;
 
     let mut out = Vec::new();
     for g in catalog.games {
@@ -218,6 +221,7 @@ pub async fn library(state: State<'_, AppState>) -> CmdResult<Vec<LibraryGame>> 
             job: state.job_running(&g.id),
             playtime_seconds: played.get(&g.id).copied().unwrap_or(0),
             hours_played: zirtola_core::api::quarter_hours(played.get(&g.id).copied().unwrap_or(0)),
+            gold_mined_g: gold.get(&g.id).copied(),
             game: g,
             install,
         });

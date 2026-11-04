@@ -297,6 +297,14 @@ async function signOut() {
 
 // ------------------------------------------------------------------ library
 
+// The games in the library: owned first, then the ones on sale now, in catalogue order. A game that isn't on sale (not
+// released, or "Coming soon") shows only to someone who owns it, by key, grant or early access; one being bought stays
+// while the purchase goes through.
+function libraryShown(lib: LibraryGame[]): LibraryGame[] {
+  const onSale = (g: LibraryGame) => Boolean(g.game.price) && g.game.sales_open !== false;
+  return [...lib.filter((g) => g.owned), ...lib.filter((g) => !g.owned && (onSale(g) || S.pending.has(g.game.id)))];
+}
+
 function selectedGame(): LibraryGame | undefined {
   return S.library.find((g) => g.game.id === S.selected) ?? S.library[0];
 }
@@ -318,6 +326,7 @@ function hero(lg: LibraryGame) {
   const inst = lg.install;
   const meta: string[] = [];
   if (S.me && (lg.owned || lg.hours_played > 0)) meta.push(fmt.hoursPlayed(lg.hours_played));
+  if (S.me && lg.gold_mined_g != null && lg.gold_mined_g > 0) meta.push(fmt.goldMined(lg.gold_mined_g));
   if (inst?.version) meta.push(`Installed ${inst.version}`);
   if (inst?.update_available && inst.latest_version) meta.push(`Update ${inst.latest_version} ${inst.update_required ? "required" : "available"}`);
   if (!inst && g.install_size) meta.push(`${fmt.bytes(g.install_size)} download`);
@@ -1067,8 +1076,7 @@ function step(delta: number) {
 async function loadLibrary() {
   try {
     const lib = await api.library();
-    // Owned first, then catalogue order.
-    S.library = [...lib.filter((g) => g.owned), ...lib.filter((g) => !g.owned)];
+    S.library = libraryShown(lib);
     if (!S.selected || !S.library.some((g) => g.game.id === S.selected)) S.selected = S.library[0]?.game.id ?? null;
     S.offline = null;
     S.lastUpdateCheck = Date.now();
@@ -1772,7 +1780,7 @@ async function startupUpdateChecks() {
     },
     refreshLibrary: async () => {
       const lib = await api.library();
-      S.library = [...lib.filter((g) => g.owned), ...lib.filter((g) => !g.owned)];
+      S.library = libraryShown(lib);
       if (!S.selected || !S.library.some((g) => g.game.id === S.selected)) S.selected = S.library[0]?.game.id ?? null;
       settlePurchases();
       return lib.map((g) => ({ id: g.game.id, owned: g.owned, updateAvailable: Boolean(g.install?.update_available), busy: Boolean(g.job) }));

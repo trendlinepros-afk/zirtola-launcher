@@ -112,6 +112,8 @@ export interface LibraryGame {
   playtime_seconds: number;
   /** The same in quarter-hour steps, rounded down. */
   hours_played: number;
+  /** Gold mined over the player's career in this game (grams), when the game reports it. */
+  gold_mined_g?: number | null;
 }
 
 export interface AppInfo {

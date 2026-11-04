@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
+
+**New**
+- **Gold mined on the game page.** Next to your hours played, the launcher now shows how much gold you've mined in the game over all your sites.
+- **Update prompts.** When a new version of the launcher or a game is out, a window shows what's new since your version, with **Update now** and **Later**. Automatic updates can be turned on in Settings.
+- **Required updates.** If an update is required, the window says why, and Play waits until it's installed.
+
+**Changed**
+- **Your library shows your games and the ones on sale.** Games that aren't out yet only appear if you have a key for them.
+
+**Fixes**
+- **No more flickering with sim racing gear.** With a racing wheel, pedals or a flight stick plugged in, the controls bar at the bottom could flash between controller and keyboard mode every time the mouse moved. Only a standard controller switches the launcher into controller mode now, and a stick has to actually move before it counts.
 
 - **Gold mined on the game page**, next to hours played (career total the game
   reports to the website; shown once there is some).

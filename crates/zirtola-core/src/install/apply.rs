@@ -462,11 +462,18 @@ pub async fn apply(
         let fin = file_path(&root, &f.path)?;
         let part = part_path(&fin);
         if part.exists() {
-            if let Err(e) = std::fs::rename(&part, &fin) {
-                if is_in_use(&e) {
-                    return Err(InstallError::FileInUse(f.path.clone()));
+            // A scanner can hold a file for a moment: try for a few seconds before calling it in use.
+            let mut tries = 0;
+            loop {
+                match std::fs::rename(&part, &fin) {
+                    Ok(()) => break,
+                    Err(e) if is_in_use(&e) && tries < 8 => {
+                        tries += 1;
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                    Err(e) if is_in_use(&e) => return Err(InstallError::FileInUse(f.path.clone())),
+                    Err(e) => return Err(e.into()),
                 }
-                return Err(e.into());
             }
         } else if !fin.is_file() {
             return Err(anyhow::anyhow!("staged file for {} is missing", f.path).into());

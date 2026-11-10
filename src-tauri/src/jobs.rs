@@ -254,7 +254,8 @@ async fn run_install(
         reg.save()?;
     }
 
-    for _attempt in 0..3 {
+    let mut ended_leftovers = false;
+    for _attempt in 0..4 {
         let resp = state
             .authed(|at| {
                 let api = state.api.clone();
@@ -302,6 +303,50 @@ async fn run_install(
                 return Ok(());
             }
             Err(InstallError::ChunkUrlExpired) => continue, // fetch a fresh link and resume
+            Err(InstallError::FileInUse(path)) => {
+                // Who has the file? A game the player can see is theirs to close. A game process with no
+                // window, started more than a minute ago, was left behind when the game closed: end it
+                // and finish the update (everything is already downloaded; only the file swap is left).
+                let procs = crate::running::under(root);
+                if procs.iter().any(|p| p.has_window) {
+                    return Err(CmdError::new(
+                        "game_open",
+                        "The game is still open. Close it, then press Update again.",
+                    )
+                    .into());
+                }
+                let leftovers: Vec<_> = procs.iter().filter(|p| p.age_s > 60).collect();
+                if !leftovers.is_empty() && !ended_leftovers {
+                    ended_leftovers = true;
+                    let mut all_gone = true;
+                    for p in &leftovers {
+                        log::warn!("update: ending leftover game process {} ({})", p.pid, p.exe);
+                        all_gone &= crate::running::end(p.pid);
+                    }
+                    if all_gone {
+                        continue;
+                    }
+                    return Err(CmdError::new(
+                        "game_stuck",
+                        "The game is still running in the background and could not be closed. End it in Task Manager (or restart the PC), then press Update again.",
+                    )
+                    .into());
+                }
+                if !procs.is_empty() {
+                    return Err(CmdError::new(
+                        "game_open",
+                        "The game is starting or still closing. Wait a moment, then press Update again.",
+                    )
+                    .into());
+                }
+                return Err(CmdError::new(
+                    "file_in_use",
+                    format!(
+                        "Windows would not let the launcher replace {path}, and the game is not running. An antivirus scan or the folder's permissions can cause this: wait a moment and press Update again, or run the launcher as administrator once."
+                    ),
+                )
+                .into());
+            }
             Err(e) => return Err(map_install_error(e)),
         }
     }

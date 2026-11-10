@@ -8,6 +8,7 @@ mod jobs;
 mod playtime;
 mod prereqs;
 mod reports;
+mod running;
 mod saves;
 mod state;
 

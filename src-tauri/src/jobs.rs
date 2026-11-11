@@ -222,6 +222,26 @@ fn map_install_error(e: InstallError) -> JobError {
     }
 }
 
+/// A first install that finds nothing on the stable channel looks on beta once.
+fn first_install_falls_back_to_beta(code: &str, never_installed: bool, branch: &str) -> bool {
+    code == "no_build" && never_installed && branch == "live"
+}
+
+async fn fetch_manifest(
+    state: &AppState,
+    game_id: &str,
+    branch: &str,
+) -> Result<zirtola_core::api::ManifestResponse, CmdError> {
+    state
+        .authed(|at| {
+            let api = state.api.clone();
+            let gid = game_id.to_string();
+            let branch = branch.to_string();
+            async move { api.manifest(&at, &gid, PLATFORM, &branch, None).await }
+        })
+        .await
+}
+
 async fn run_install(
     app: &AppHandle,
     game_id: &str,
@@ -231,13 +251,13 @@ async fn run_install(
 ) -> Result<(), JobError> {
     let state = app.state::<AppState>();
     let progress = progress_emitter(app.clone(), game_id.to_string(), kind);
-    let (branch, parallel) = {
+    let (mut branch, parallel, never_installed) = {
         let reg = state.registry.lock().await;
-        let branch = reg
-            .get(game_id)
-            .map(|r| r.branch.clone())
-            .unwrap_or_else(|| "live".into());
-        (branch, state.settings.lock().await.parallel_downloads)
+        let rec = reg.get(game_id);
+        let branch = rec.map(|r| r.branch.clone()).unwrap_or_else(|| "live".into());
+        // No record, or one left by a first install that never finished.
+        let never_installed = rec.map_or(true, |r| r.version.is_none());
+        (branch, state.settings.lock().await.parallel_downloads, never_installed)
     };
 
     // Remember the folder right away so a paused first install can be resumed.
@@ -256,14 +276,35 @@ async fn run_install(
 
     let mut ended_leftovers = false;
     for _attempt in 0..4 {
-        let resp = state
-            .authed(|at| {
-                let api = state.api.clone();
-                let gid = game_id.to_string();
-                let branch = branch.clone();
-                async move { api.manifest(&at, &gid, PLATFORM, &branch, None).await }
-            })
-            .await?;
+        let resp = match fetch_manifest(&state, game_id, &branch).await {
+            Ok(r) => r,
+            // A game whose only build is on beta (a new game's first test build) has nothing on stable,
+            // and the channel can only be switched on an installed game. On a first install, look on beta
+            // before giving up: the server only answers there for an account with beta access.
+            Err(e) if first_install_falls_back_to_beta(&e.code, never_installed, &branch) => {
+                match fetch_manifest(&state, game_id, "beta").await {
+                    Ok(r) => {
+                        log::info!("install {game_id}: nothing on stable, installing the beta build");
+                        branch = "beta".into();
+                        let mut reg = state.registry.lock().await;
+                        if let Some(mut rec) = reg.get(game_id).cloned() {
+                            rec.branch = branch.clone();
+                            reg.put(rec);
+                            reg.save()?;
+                        }
+                        r
+                    }
+                    Err(_) => {
+                        return Err(CmdError::new(
+                            "no_build",
+                            "This game has no public build to download yet. If a beta build is out, it needs Beta access on your account.",
+                        )
+                        .into())
+                    }
+                }
+            }
+            Err(e) => return Err(e.into()),
+        };
         let manifest = {
             let keys = state.keys.read().await;
             resp.signed_manifest.open(&keys).map_err(|e| {
@@ -526,4 +567,21 @@ pub fn spawn_uninstall(app: AppHandle, game_id: String, root: PathBuf) {
         };
         finish(&app, ev);
     });
+}
+
+#[cfg(test)]
+mod beta_fallback_tests {
+    use super::first_install_falls_back_to_beta as f;
+
+    #[test]
+    fn only_a_first_install_with_nothing_on_stable_looks_on_beta() {
+        assert!(f("no_build", true, "live"));
+        // an installed game keeps its channel
+        assert!(!f("no_build", false, "live"));
+        // already asking beta: nothing else to try
+        assert!(!f("no_build", true, "beta"));
+        // any other refusal is reported as it is
+        assert!(!f("not_entitled", true, "live"));
+        assert!(!f("network", true, "live"));
+    }
 }

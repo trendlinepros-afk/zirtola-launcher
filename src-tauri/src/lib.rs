@@ -61,6 +61,12 @@ pub fn run() {
                 e
             })?;
             app.manage(st);
+            // The window is made here, not from the config, so a WebView2 that won't start gets retried
+            // (fresh profile folder, then without the GPU) instead of closing the launcher.
+            if let Err(e) = startup::create_main_window(app) {
+                startup::failed_webview(&e);
+                std::process::exit(1);
+            }
             match app.get_webview_window("main") {
                 Some(w) => startup::note(format!(
                     "setup done: window created at {:?}, size {:?}, visible {:?}",

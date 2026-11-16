@@ -123,6 +123,90 @@ pub fn watch_ui() {
     });
 }
 
+/// Tauri's own extra WebView2 switches; setting our own replaces them, so they are repeated here.
+const BASE_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+
+/// Make the main window. When WebView2 won't start its browser process (seen: 0x80080005 "Server execution
+/// failed"), try again with a second profile folder (a stuck or damaged one is the usual cause), then with a
+/// brand-new folder and the GPU off. The folder that worked is remembered for the next start.
+pub fn create_main_window(app: &tauri::App) -> Result<(), String> {
+    use tauri::Manager;
+    let cfg = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == "main")
+        .cloned()
+        .ok_or_else(|| "no main window in the config".to_string())?;
+    let base = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+    let marker = base.join("webview_profile.txt");
+    let remembered = std::fs::read_to_string(&marker).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+
+    // (profile folder name or None for the default, extra switches)
+    let mut tries: Vec<(Option<String>, String)> = Vec::new();
+    if let Some(r) = &remembered {
+        tries.push((Some(r.clone()), BASE_ARGS.to_string()));
+    }
+    tries.push((None, BASE_ARGS.to_string()));
+    if remembered.as_deref() != Some("EBWebView2") {
+        tries.push((Some("EBWebView2".into()), BASE_ARGS.to_string()));
+    }
+    let stamp = chrono::Local::now().format("%Y%m%d%H%M%S").to_string();
+    tries.push((Some(format!("EBWebView-{stamp}")), format!("{BASE_ARGS} --disable-gpu")));
+
+    let mut last = String::new();
+    for (i, (folder, args)) in tries.iter().enumerate() {
+        let mut b = tauri::WebviewWindowBuilder::from_config(app, &cfg).map_err(|e| e.to_string())?;
+        if let Some(f) = folder {
+            b = b.data_directory(base.join(f));
+        } else if std::env::var_os("ZIRTOLA_TEST_WEBVIEW_FAIL").is_some() {
+            // (test only: a profile folder under a file can't be made, so the first try fails like the real fault)
+            let block = base.join("webview_test_block");
+            let _ = std::fs::create_dir_all(&base);
+            let _ = std::fs::write(&block, "");
+            b = b.data_directory(block.join("x"));
+        }
+        b = b.additional_browser_args(args);
+        match b.build() {
+            Ok(_) => {
+                note(format!(
+                    "window created (try {} of {}, profile {}, switches {args})",
+                    i + 1,
+                    tries.len(),
+                    folder.as_deref().unwrap_or("default")
+                ));
+                if remembered.as_deref() != folder.as_deref() {
+                    let _ = std::fs::write(&marker, folder.as_deref().unwrap_or(""));
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                last = e.to_string();
+                note(format!("window try {} failed (profile {}): {last}", i + 1, folder.as_deref().unwrap_or("default")));
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.destroy();
+                }
+            }
+        }
+    }
+    Err(last)
+}
+
+/// Every window try failed: say what to do in plain steps.
+pub fn failed_webview(err: &str) {
+    note(format!("FAILED creating its window after every try: {err}"));
+    error_box(&format!(
+        "The Zirtola Launcher's window could not start, because Windows wouldn't start Microsoft Edge WebView2 for it.\n\n\
+         Please try, in order:\n\
+         1. Restart the PC (this clears a stuck WebView2), then open the launcher normally (not \"Run as administrator\").\n\
+         2. Windows Settings > Apps > Installed apps > Microsoft Edge WebView2 Runtime > Modify > Repair.\n\
+         3. If you use antivirus other than Windows Security, allow zirtola-launcher.exe and msedgewebview2.exe.\n\n\
+         Details: {err}{}",
+        log_hint()
+    ));
+}
+
 /// `run()` returned an error instead of a window.
 pub fn failed(what: &str, err: &dyn std::fmt::Display) {
     note(format!("FAILED {what}: {err}"));

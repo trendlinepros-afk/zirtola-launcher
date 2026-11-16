@@ -85,6 +85,10 @@ pub fn begin() -> bool {
     match tauri::webview_version() {
         Ok(v) => {
             note(format!("WebView2 runtime {v}"));
+            match webview_block(&v) {
+                Some(b) => note(format!("WebView2 BLOCKED: {b}")),
+                None => note("WebView2 not blocked (no Image File Execution Options entry, runtime files present)"),
+            }
             true
         }
         Err(e) => {
@@ -158,9 +162,10 @@ pub fn create_main_window(app: &tauri::App) -> Result<(), String> {
     let mut last = String::new();
     for (i, (folder, args)) in tries.iter().enumerate() {
         let mut b = tauri::WebviewWindowBuilder::from_config(app, &cfg).map_err(|e| e.to_string())?;
-        if let Some(f) = folder {
-            b = b.data_directory(base.join(f));
-        } else if std::env::var_os("ZIRTOLA_TEST_WEBVIEW_FAIL").is_some() {
+        let test_fail = std::env::var("ZIRTOLA_TEST_WEBVIEW_FAIL").ok();
+        if folder.is_some() && test_fail.as_deref() != Some("all") {
+            b = b.data_directory(base.join(folder.as_deref().unwrap_or_default()));
+        } else if test_fail.is_some() {
             // (test only: a profile folder under a file can't be made, so the first try fails like the real fault)
             let block = base.join("webview_test_block");
             let _ = std::fs::create_dir_all(&base);
@@ -193,9 +198,62 @@ pub fn create_main_window(app: &tauri::App) -> Result<(), String> {
     Err(last)
 }
 
+/// Why WebView2 can't run on this PC, when we can tell. Tools that "disable" or "debloat" Microsoft Edge commonly
+/// stop msedgewebview2.exe with an Image File Execution Options "Debugger" entry, or delete the runtime's files;
+/// Windows then refuses to start it (0x80080005 "Server execution failed").
+pub fn webview_block(version: &str) -> Option<String> {
+    if std::env::var_os("ZIRTOLA_TEST_WEBVIEW_BLOCKED").is_some() {
+        return Some("test: pretend a tool blocked msedgewebview2.exe".into());
+    }
+    #[cfg(windows)]
+    {
+        use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY};
+        let ifeo = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\msedgewebview2.exe";
+        let hklm = winreg::RegKey::predef(HKEY_LOCAL_MACHINE);
+        for view in [KEY_WOW64_64KEY, KEY_WOW64_32KEY] {
+            if let Ok(k) = hklm.open_subkey_with_flags(ifeo, KEY_READ | view) {
+                if let Ok(d) = k.get_value::<String, _>("Debugger") {
+                    return Some(format!("an Image File Execution Options entry stops msedgewebview2.exe from starting (Debugger = \"{d}\")"));
+                }
+            }
+        }
+        // the runtime's own exe, where the registry says the runtime is
+        let mut roots: Vec<std::path::PathBuf> = Vec::new();
+        for var in ["ProgramFiles(x86)", "ProgramFiles"] {
+            if let Some(p) = std::env::var_os(var) {
+                roots.push(std::path::PathBuf::from(p).join(r"Microsoft\EdgeWebView\Application"));
+            }
+        }
+        if let Some(p) = std::env::var_os("LOCALAPPDATA") {
+            roots.push(std::path::PathBuf::from(p).join(r"Microsoft\EdgeWebView\Application"));
+        }
+        let present = roots.iter().any(|r| r.join(version).join("msedgewebview2.exe").is_file());
+        let any_root = roots.iter().any(|r| r.is_dir());
+        if any_root && !present {
+            return Some(format!("WebView2 {version} is registered but its msedgewebview2.exe is missing (removed by a tool or a broken install)"));
+        }
+    }
+    None
+}
+
 /// Every window try failed: say what to do in plain steps.
 pub fn failed_webview(err: &str) {
     note(format!("FAILED creating its window after every try: {err}"));
+    let block = tauri::webview_version().ok().and_then(|v| webview_block(&v));
+    if let Some(b) = block {
+        error_box(&format!(
+            "The Zirtola Launcher can't open because Microsoft Edge WebView2 is blocked on this PC.\n\n\
+             Found: {b}.\n\n\
+             This usually comes from a tool used to disable or \"debloat\" Microsoft Edge. You don't have to use Edge \
+             as your browser, but the launcher's window is drawn by WebView2 (as in many other apps), so it must be allowed to run.\n\n\
+             To fix it:\n\
+             1. In the tool you used to disable Edge, re-enable Edge / WebView2 (or undo its Edge changes).\n\
+             2. Reinstall the WebView2 Runtime: https://developer.microsoft.com/microsoft-edge/webview2/ (Evergreen Standalone Installer, x64).\n\
+             3. Start the launcher again.{}",
+            log_hint()
+        ));
+        return;
+    }
     error_box(&format!(
         "The Zirtola Launcher's window could not start, because Windows wouldn't start Microsoft Edge WebView2 for it.\n\n\
          Please try, in order:\n\

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.5
+
+**Fixes**
+- **The launcher opens on PCs where WebView2 wouldn't start for it.** Some PCs refused to start Microsoft Edge WebView2 for the launcher ("Server execution failed"), so it closed straight away. It now tries again with a fresh WebView2 folder, and then without the graphics card, and remembers the setting that worked. If nothing works, it shows plain steps to fix it instead of an error.
+
 ## 0.2.4
 
 **Fixes**

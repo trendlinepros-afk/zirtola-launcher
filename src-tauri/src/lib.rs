@@ -10,30 +10,67 @@ mod prereqs;
 mod reports;
 mod running;
 mod saves;
+mod startup;
 mod state;
 
 use tauri::{Emitter, Manager};
 
 pub fn run() {
-    tauri::Builder::default()
+    if !startup::begin() {
+        return;
+    }
+    let built = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // A second start (e.g. the website's zirtola://refresh link) is
             // forwarded here: refresh the running launcher and bring it forward.
             if let Some(link) = commands::deep_link_arg(args) {
                 let _ = app.emit("deep-link", link);
             }
+            startup::note("a second start was handed to this running launcher: bringing its window forward");
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.unminimize();
                 let _ = w.show();
+                // A window left on a monitor that is no longer there comes back to the middle of the main screen.
+                let on_screen = match (w.outer_position(), w.available_monitors()) {
+                    (Ok(p), Ok(ms)) => ms.iter().any(|m| {
+                        let (mp, sz) = (m.position(), m.size());
+                        p.x + 100 > mp.x && p.x < mp.x + sz.width as i32 - 100 && p.y >= mp.y - 20 && p.y < mp.y + sz.height as i32 - 100
+                    }),
+                    _ => true,
+                };
+                if !on_screen {
+                    startup::note("its window was off every screen: centred");
+                    let _ = w.center();
+                }
                 let _ = w.set_focus();
+            } else {
+                startup::note("the running launcher has no window");
             }
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            let dir = app.path().app_data_dir()?;
-            app.manage(state::AppState::new(dir)?);
+            let dir = app.path().app_data_dir().map_err(|e| {
+                startup::failed("finding its data folder", &e);
+                e
+            })?;
+            startup::note(format!("setup: data folder {}", dir.display()));
+            let st = state::AppState::new(dir).map_err(|e| {
+                startup::failed("opening its data folder", &format!("{e:#}"));
+                e
+            })?;
+            app.manage(st);
+            match app.get_webview_window("main") {
+                Some(w) => startup::note(format!(
+                    "setup done: window created at {:?}, size {:?}, visible {:?}",
+                    w.outer_position().ok(),
+                    w.outer_size().ok(),
+                    w.is_visible().ok()
+                )),
+                None => startup::note("setup done: NO main window was created"),
+            }
+            startup::watch_ui();
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -98,6 +135,16 @@ pub fn run() {
             commands::send_crash_report,
             commands::dismiss_crash,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running the Zirtola Launcher");
+        .build(tauri::generate_context!());
+    match built {
+        Ok(app) => {
+            app.run(|_, event| {
+                if let tauri::RunEvent::Exit = event {
+                    startup::note("exit");
+                }
+            });
+        }
+        // (a second start handed to the running launcher exits inside the single-instance plugin and never gets here)
+        Err(e) => startup::failed("creating its window", &e),
+    }
 }

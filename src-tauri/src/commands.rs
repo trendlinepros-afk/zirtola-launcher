@@ -25,6 +25,7 @@ pub struct AppInfo {
 
 #[tauri::command]
 pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> CmdResult<AppInfo> {
+    crate::startup::ui_alive();
     let cfg = state.config().await.ok();
     Ok(AppInfo {
         version: app.package_info().version.to_string(),
@@ -41,6 +42,7 @@ pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> CmdResult<A
 
 #[tauri::command]
 pub async fn restore_session(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Option<Me>> {
+    crate::startup::ui_alive();
     let me = state.restore_session().await?;
     if me.is_some() {
         tauri::async_runtime::spawn(crate::reports::report_hardware_if_needed(app.clone()));
@@ -669,6 +671,7 @@ pub fn open_url(url: String) -> CmdResult<()> {
 /// A `zirtola://` link the launcher was started with (Windows passes it as an argument).
 #[tauri::command]
 pub fn startup_deep_link() -> Option<String> {
+    crate::startup::ui_alive();
     deep_link_arg(std::env::args())
 }
 
@@ -686,6 +689,7 @@ pub async fn open_install_folder(state: State<'_, AppState>, game_id: String) ->
 
 #[tauri::command]
 pub async fn get_settings(state: State<'_, AppState>) -> CmdResult<Settings> {
+    crate::startup::ui_alive();
     Ok(state.settings.lock().await.clone())
 }
 

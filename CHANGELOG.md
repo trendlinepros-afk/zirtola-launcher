@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.6
+
+**Fixes**
+- **Says so when Microsoft Edge WebView2 is blocked.** Tools that disable or "debloat" Microsoft Edge usually block WebView2 too, and the launcher's window is drawn by WebView2, so it couldn't open. The launcher now recognises the usual block and shows what was found and how to fix it (re-enable WebView2 in that tool, or reinstall the WebView2 Runtime). You can keep using any browser you like.
+
 ## 0.2.5
 
 **Fixes**

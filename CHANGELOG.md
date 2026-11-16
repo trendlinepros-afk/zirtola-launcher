@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.4
+
+**Fixes**
+- **A launcher that opens and closes straight away now says why.** If it can't open its window, it shows a message with the reason (most often Microsoft Edge WebView2 missing or damaged, with the fix) instead of closing silently.
+- **Startup log.** Every start is written to `%LOCALAPPDATA%\Zirtola Launcher\logs\startup.log`. If the launcher won't open for you, send that file to us in #help on Discord.
+- **A launcher window left on a monitor that is no longer connected** comes back to the middle of your main screen when you start the launcher again.
+
 ## 0.2.3
 
 **Fixes**

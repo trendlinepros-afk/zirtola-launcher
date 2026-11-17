@@ -201,6 +201,29 @@ pub fn files_of(dir: &Path) -> Vec<CrashFile> {
     v
 }
 
+/// The crash folder zipped, with the game's own log added when the folder has no log of its own.
+pub fn zip_crash_dir_with_log(dir: &Path, game_log: Option<&Path>) -> anyhow::Result<Vec<u8>> {
+    let has_log = files_of(dir).iter().any(|f| f.name.to_ascii_lowercase().ends_with(".log"));
+    let Some(log) = game_log.filter(|_| !has_log) else {
+        return zip_crash_dir(dir);
+    };
+    // (both into one zip: the folder's files, then the log)
+    let folder = zip_crash_dir(dir)?;
+    let single = zip_log_file(log)?;
+    let mut out = std::io::Cursor::new(Vec::new());
+    {
+        let mut w = zip::ZipWriter::new(&mut out);
+        for src in [folder, single] {
+            let mut r = zip::ZipArchive::new(std::io::Cursor::new(src))?;
+            for i in 0..r.len() {
+                w.raw_copy_file(r.by_index_raw(i)?)?;
+            }
+        }
+        w.finish()?;
+    }
+    Ok(out.into_inner())
+}
+
 /// Zip the crash folder: logs (last 8 MB), crash context and other small text
 /// files, and the minidump if it is under 40 MB. Total stays under 48 MB.
 pub fn zip_crash_dir(dir: &Path) -> anyhow::Result<Vec<u8>> {

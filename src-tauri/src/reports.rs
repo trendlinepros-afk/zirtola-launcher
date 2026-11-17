@@ -159,10 +159,9 @@ pub fn watch_game(
             return;
         }
         let mut c = candidate(&m, &title, code, new_dir);
-        if c.dir.is_none() {
-            // (no crash folder: send the game's own log from this run, if it wrote one)
-            c.game_log = crash::game_log_since(&root, &m, started);
-        }
+        // the game's own log from this run, if it wrote one: sent alone when there is no crash folder, and added to a
+        // crash folder that has no log of its own (a Shipping build's crash handler may not copy it)
+        c.game_log = crash::game_log_since(&root, &m, started);
         offer(&app, c);
     });
 }
@@ -228,7 +227,8 @@ pub async fn send(app: &AppHandle, id: &str, comment: &str) -> CmdResult<String>
     let zip = match &c.dir {
         Some(d) => {
             let d = d.clone();
-            tauri::async_runtime::spawn_blocking(move || crash::zip_crash_dir(&d))
+            let log = c.game_log.clone();
+            tauri::async_runtime::spawn_blocking(move || crash::zip_crash_dir_with_log(&d, log.as_deref()))
                 .await
                 .map_err(|e| CmdError::new("error", e.to_string()))??
         }

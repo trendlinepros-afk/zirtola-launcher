@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.8
+
+**Better crash reports**
+- **A crash report now includes the game's log from that session** (once your game is on a version that writes one), so we can see what led up to the crash. Before, a game that closed with an error code sent no files at all.
+- Only the last part of the log is sent, and only when you choose to send the report.
+
 ## 0.2.7
 
 **Fixes**

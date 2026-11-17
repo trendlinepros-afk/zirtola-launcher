@@ -41,6 +41,9 @@ pub struct CrashCandidate {
     pub detected_at: String,
     #[serde(skip)]
     pub dir: Option<PathBuf>,
+    /// The game's own log from that run, sent when there is no crash folder (a bad exit UE didn't catch).
+    #[serde(skip)]
+    pub game_log: Option<PathBuf>,
 }
 
 /// The project name UE uses for its Saved folder: the executable name without
@@ -81,6 +84,51 @@ pub fn crash_roots(install_root: &Path, m: &Manifest) -> Vec<PathBuf> {
     }
     roots.push(install_root.join("Saved").join("Crashes"));
     roots
+}
+
+/// The game's own log (`%LOCALAPPDATA%\<Project>\Saved\Logs\<Project>.log`) if it was written since `since`:
+/// what a report for a bad exit with no crash folder can carry.
+pub fn game_log_since(install_root: &Path, m: &Manifest, since: SystemTime) -> Option<PathBuf> {
+    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    let mut found: Option<(PathBuf, SystemTime)> = None;
+    for name in project_names(m) {
+        let mut dirs = vec![install_root.join(&name).join("Saved").join("Logs")];
+        if let Some(l) = &local {
+            dirs.insert(0, l.join(&name).join("Saved").join("Logs"));
+        }
+        for d in dirs {
+            let p = d.join(format!("{name}.log"));
+            if let Ok(t) = std::fs::metadata(&p).and_then(|md| md.modified()) {
+                if t >= since && found.as_ref().map_or(true, |(_, ft)| t > *ft) {
+                    found = Some((p, t));
+                }
+            }
+        }
+    }
+    found.map(|(p, _)| p)
+}
+
+/// Zip one log file (its last 8 MB).
+pub fn zip_log_file(path: &Path) -> anyhow::Result<Vec<u8>> {
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        let size = std::fs::metadata(path)?.len();
+        let take = size.min(MAX_LOG_BYTES);
+        let mut file = std::fs::File::open(path)?;
+        if size > take {
+            file.seek(SeekFrom::Start(size - take))?;
+        }
+        let mut data = Vec::with_capacity(take as usize);
+        file.take(take).read_to_end(&mut data)?;
+        let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "game.log".into());
+        zip.start_file(name.as_str(), opts)?;
+        zip.write_all(&data)?;
+        zip.finish()?;
+    }
+    Ok(buf.into_inner())
 }
 
 /// Crash folders under `roots`, with their modification time.

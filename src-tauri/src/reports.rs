@@ -118,6 +118,7 @@ fn candidate(
         files: dir.as_deref().map(crash::files_of).unwrap_or_default(),
         detected_at: now_rfc3339(),
         dir,
+        game_log: None,
     }
 }
 
@@ -157,7 +158,11 @@ pub fn watch_game(
         if new_dir.is_none() && code == Some(0) {
             return;
         }
-        let c = candidate(&m, &title, code, new_dir);
+        let mut c = candidate(&m, &title, code, new_dir);
+        if c.dir.is_none() {
+            // (no crash folder: send the game's own log from this run, if it wrote one)
+            c.game_log = crash::game_log_since(&root, &m, started);
+        }
         offer(&app, c);
     });
 }
@@ -227,7 +232,15 @@ pub async fn send(app: &AppHandle, id: &str, comment: &str) -> CmdResult<String>
                 .await
                 .map_err(|e| CmdError::new("error", e.to_string()))??
         }
-        None => Vec::new(),
+        None => match &c.game_log {
+            Some(p) => {
+                let p = p.clone();
+                tauri::async_runtime::spawn_blocking(move || crash::zip_log_file(&p))
+                    .await
+                    .map_err(|e| CmdError::new("error", e.to_string()))??
+            }
+            None => Vec::new(),
+        },
     };
     let share_hw = state.settings.lock().await.share_hardware_info;
     let hw = if share_hw {

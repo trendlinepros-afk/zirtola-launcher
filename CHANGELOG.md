@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.9
+
+**Playtime**
+- **Closing the launcher while you play no longer stops your playtime.** The launcher's window hides instead, your hours keep counting, and it closes itself once the game exits. If the game crashes, the window comes back with the crash report offer.
+- Open the launcher again while it's hidden and it stays open after the game.
+
+Hours played count the time the game is in front and you're using the keyboard, mouse or a controller, rounded down to the quarter hour.
+
+Let us know if you experience more issues with this.
+
 ## 0.2.8
 
 **Better crash reports**

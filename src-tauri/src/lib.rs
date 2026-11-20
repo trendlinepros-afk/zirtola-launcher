@@ -27,6 +27,8 @@ pub fn run() {
                 let _ = app.emit("deep-link", link);
             }
             startup::note("a second start was handed to this running launcher: bringing its window forward");
+            // (opened again while hidden behind a running game: the player wants it, so it stays open after the game)
+            reports::CLOSE_WHEN_DONE.store(false, std::sync::atomic::Ordering::SeqCst);
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.unminimize();
                 let _ = w.show();
@@ -81,6 +83,15 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // A game is still running: hide the window instead of closing, so the run keeps being timed for
+                // playtime and a crash is still caught; the launcher closes itself once the game exits.
+                if reports::GAMES_RUNNING.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+                    api.prevent_close();
+                    reports::CLOSE_WHEN_DONE.store(true, std::sync::atomic::Ordering::SeqCst);
+                    let _ = window.hide();
+                    startup::note("window closed while a game runs: hidden until the game exits");
+                    return;
+                }
                 // Pause running downloads cleanly so their journals are saved.
                 let app = window.app_handle().clone();
                 if commands::cancel_all_jobs(&app) {

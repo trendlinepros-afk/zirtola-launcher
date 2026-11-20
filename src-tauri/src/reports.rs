@@ -5,6 +5,7 @@ use crate::hardware::{self, HardwareReport};
 use crate::state::{AppState, CmdError, CmdResult};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Emitter, Manager};
 use zirtola_core::install;
@@ -142,11 +143,13 @@ pub fn watch_game(
         .map(|(p, _)| crash::seen_key(&p))
         .collect();
     let started = SystemTime::now();
+    GAMES_RUNNING.fetch_add(1, Ordering::SeqCst);
     std::thread::spawn(move || {
         let code = child.wait().ok().and_then(|s| s.code());
         if let Some(t) = tracker {
             t.finish();
         }
+        let left = GAMES_RUNNING.fetch_sub(1, Ordering::SeqCst).saturating_sub(1);
         // Give UE's crash handler a moment to finish writing the folder.
         std::thread::sleep(Duration::from_secs(2));
         let state = app.state::<AppState>();
@@ -156,6 +159,9 @@ pub fn watch_game(
             .into_iter()
             .next();
         if new_dir.is_none() && code == Some(0) {
+            if left == 0 {
+                closed_window_done(&app, false);
+            }
             return;
         }
         let mut c = candidate(&m, &title, code, new_dir);
@@ -163,6 +169,37 @@ pub fn watch_game(
         // crash folder that has no log of its own (a Shipping build's crash handler may not copy it)
         c.game_log = crash::game_log_since(&root, &m, started);
         offer(&app, c);
+        if left == 0 {
+            closed_window_done(&app, true);
+        }
+    });
+}
+
+/// Games the launcher started that are still running (timed for playtime, watched for crashes).
+pub static GAMES_RUNNING: AtomicUsize = AtomicUsize::new(0);
+/// The player closed the launcher's window while a game was running: the window was hidden instead, so the run is
+/// still timed and its crash still caught; the launcher closes once the last game exits.
+pub static CLOSE_WHEN_DONE: AtomicBool = AtomicBool::new(false);
+
+/// The last running game has exited. If the player had closed the window meanwhile, the launcher now closes (after
+/// the playtime report is sent), unless the game crashed: then the window comes back with the crash report offer.
+fn closed_window_done(app: &AppHandle, crashed: bool) {
+    if !CLOSE_WHEN_DONE.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    if crashed {
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+        return;
+    }
+    crate::startup::note("the last game exited after the window was closed: closing the launcher");
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        // the final playtime report has been queued; give its send a few seconds (it stays queued if it fails)
+        crate::playtime::flush(app.clone()).await;
+        app.exit(0);
     });
 }
 
